@@ -182,37 +182,85 @@ class AI(object):
     def train(self, clf, x, y):
         return clf.fit(x, y)
 
+    '''
+    modifications Folmer 13-09-2024:
+    Added support for whitelists and blacklists.
+    Allows the end-user to select or exclude certain access points based on MAC address.
+    Whitelist takes precedence over blacklist (usually you only select one of them).
+    Format:
+        {
+            "whitelist": 
+            [
+                "wifi-38:91:b7:1a:22:ec",
+                "wifi-38:91:b7:1a:22:e2"
+            ],
+            "blacklist":
+            [
+                ""
+            ]
+        }
+    '''
     def learn(self, fname):
         t = time.time()
         # load CSV file
-        self.header = []
         rows = []
         naming_num = 0
+
         with open(fname, 'r') as csvfile:
+            # if file does not exist, simply ignore it
+            jsonfname = 'filter.json'
+            try:
+                filter = json.load(open(jsonfname))
+            except:
+                pass
+
+            # always include the location
             reader = csv.reader(csvfile, delimiter=',')
+            fullheader = next(reader)
+            columns = [0]
+            self.header = ['location']
+
+            # check which columns to include and build a new header
+            for i, column in enumerate(fullheader):
+                # try if whitelist if available
+                try:
+                    if column in filter["whitelist"]:
+                        columns.append(i)
+                        self.header.append(column)
+                except:
+                    # if not, try to use blacklist
+                    try:
+                        if column not in filter["blacklist"]:
+                            columns.append(i)
+                            self.header.append(column)
+                    except:
+                        # no white- or blacklist, just use it
+                        columns.append(i)
+                        self.header.append(column)
+            self.logger.debug("Using %d features for the AI: %s" % (len(self.header), self.header))
+
             for i, row in enumerate(reader):
-                self.logger.debug(row)
-                if i == 0:
-                    self.header = row
-                else:
-                    for j, val in enumerate(row):
-                        if j == 0:
-                            # this is a name of the location
-                            if val not in self.naming['from']:
-                                self.naming['from'][val] = naming_num
-                                self.naming['to'][naming_num] = val
-                                naming_num += 1
-                            row[j] = self.naming['from'][val]
-                            continue
-                        if val == '':
-                            row[j] = 0
-                            continue
-                        try:
-                            row[j] = float(val)
-                        except:
-                            self.logger.error(
-                                "problem parsing value " + str(val))
-                    rows.append(row)
+                new_row = []
+                for j, val in enumerate(row):
+                    if j == 0:
+                        # this is a name of the location
+                        if val not in self.naming['from']:
+                            self.naming['from'][val] = naming_num
+                            self.naming['to'][naming_num] = val
+                            naming_num += 1
+                        new_row.append(self.naming['from'][val])
+                        continue
+                    if val == '':
+                        new_row.append(0)
+                        continue
+                    try:
+                        new_row.append(float(val))
+                    except:
+                        self.logger.error(
+                            "problem parsing value " + str(val))
+                if(len(new_row) != len(self.header)):
+                    self.logger.error("Row size(%) should be the same as header size(%d)" % (len(new_row), len(self.header)))
+                rows.append(new_row)
 
         # first column in row is the classification, Y
         y = numpy.zeros(len(rows))
