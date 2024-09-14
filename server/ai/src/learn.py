@@ -241,7 +241,8 @@ class AI(object):
 
             for i, row in enumerate(reader):
                 new_row = []
-                for j, val in enumerate(row):
+                for j in columns:
+                    val = row[j]
                     if j == 0:
                         # this is a name of the location
                         if val not in self.naming['from']:
