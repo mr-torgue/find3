@@ -104,7 +104,7 @@ class AI(object):
         self.logger.debug("Using %d features to classify!" % len(header))
         payload = {'location_names': self.naming['to'], 'predictions': []}
         # check if most values have been set
-        if(float(np.count_nonzero(csv_data == self.default_value)) / len(header) >= self.threshold):
+        if(float(numpy.count_nonzero(csv_data == self.default_value)) / len(header) >= self.threshold):
 
             threads = [None]*len(self.algorithms)
             self.results = [None]*len(self.algorithms)
