@@ -338,28 +338,28 @@ class AI(object):
             if "Nearest Neighbors" in settings["models"]:
                 names.append("Nearest Neighbors")
                 classifiers.append(KNeighborsClassifier(3))
-            elif "Linear SVM" in settings["models"]:
+            if "Linear SVM" in settings["models"]:
                 names.append("Linear SVM")
                 classifiers.append(SVC(kernel="linear", C=0.025, probability=True))
-            elif "RBF SVM" in settings["models"]:
+            if "RBF SVM" in settings["models"]:
                 names.append("RBF SVM")
                 classifiers.append(SVC(gamma=2, C=1, probability=True))
-            elif "Decision Tree" in settings["models"]:
+            if "Decision Tree" in settings["models"]:
                 names.append("Decision Tree")
                 classifiers.append(DecisionTreeClassifier(max_depth=5))
-            elif "Random Forest" in settings["models"]:
+            if "Random Forest" in settings["models"]:
                 names.append("Random Forest")
                 classifiers.append(RandomForestClassifier(max_depth=5, n_estimators=10, max_features=1))
-            elif "Neural Net" in settings["models"]:
+            if "Neural Net" in settings["models"]:
                 names.append("Neural Net")
                 classifiers.append(MLPClassifier(alpha=1))
-            elif "AdaBoost" in settings["models"]:
+            if "AdaBoost" in settings["models"]:
                 names.append("AdaBoost")
                 classifiers.append(AdaBoostClassifier())
-            elif "Naive Bayes" in settings["models"]:
+            if "Naive Bayes" in settings["models"]:
                 names.append("Naive Bayes")
                 classifiers.append(GaussianNB())
-            elif "QDA" in settings["models"]:
+            if "QDA" in settings["models"]:
                 names.append("QDA")
                 classifiers.append(QuadraticDiscriminantAnalysis())
         except:
