@@ -81,34 +81,44 @@ class AI(object):
         self.family = family
         self.path_to_data = path_to_data
 
+
+    ''' changes Folmer 14-05-2025
+    Includes the following:
+    1. default value  (specified by self.default_value)
+    2. ignore data that see less than x percent of the access points (specified by self.threshold)
+    '''
     def classify(self, sensor_data):
         header = self.header[1:]
         is_unknown = True
-        csv_data = numpy.zeros(len(header))
+        csv_data = numpy.full(len(header), self.default_value)
         for sensorType in sensor_data['s']:
             for sensor in sensor_data['s'][sensorType]:
                 sensorName = sensorType + "-" + sensor
                 if sensorName in header:
                     is_unknown = False
-                    csv_data[header.index(sensorName)] = sensor_data[
-                        's'][sensorType][sensor]
+                    csv_data[header.index(sensorName)] = sensor_data['s'][sensorType][sensor]
+        
         self.headerClassify = header
         self.csv_dataClassify = csv_data.reshape(1, -1)
+
+        self.logger.debug("Using %d features to classify!" % len(header))
         payload = {'location_names': self.naming['to'], 'predictions': []}
+        # check if most values have been set
+        if(float(np.count_nonzero(csv_data == self.default_value)) / len(header) >= self.threshold):
 
-        threads = [None]*len(self.algorithms)
-        self.results = [None]*len(self.algorithms)
+            threads = [None]*len(self.algorithms)
+            self.results = [None]*len(self.algorithms)
 
-        for i, alg in enumerate(self.algorithms.keys()):
-            threads[i] = Thread(target=self.do_classification, args=(i, alg))
-            threads[i].start()
+            for i, alg in enumerate(self.algorithms.keys()):
+                threads[i] = Thread(target=self.do_classification, args=(i, alg))
+                threads[i].start()
 
-        for i, _ in enumerate(self.algorithms.keys()):
-            threads[i].join()
+            for i, _ in enumerate(self.algorithms.keys()):
+                threads[i].join()
 
-        for result in self.results:
-            if result != None:
-                payload['predictions'].append(result)
+            for result in self.results:
+                if result != None:
+                    payload['predictions'].append(result)
         payload['is_unknown'] = is_unknown
         return payload
 
@@ -187,17 +197,41 @@ class AI(object):
     Added support for whitelists and blacklists.
     Allows the end-user to select or exclude certain access points based on MAC address.
     Whitelist takes precedence over blacklist (usually you only select one of them).
+
+    Modifications 13-05-2025:
+    Added some more settings. 
+    Allowed for model selection. 
+    Also added a default value. Default value of 0 might be problematic, since it indicates a really strong connection (RSSI)
+    Threshold can be specified, so that certain requests with insufficient data are not classified (prevents weird classifications)
+
     Format:
         {
             "whitelist": 
             [
                 "wifi-38:91:b7:1a:22:ec",
-                "wifi-38:91:b7:1a:22:e2"
+                "wifi-38:91:b7:1a:22:e2",
+                ...
             ],
             "blacklist":
             [
-                ""
-            ]
+                "wifi-38:91:b7:1a:22:ec",
+                ...
+            ],
+            "models":
+            [
+                "Nearest Neighbors",
+                "Linear SVM",
+                "RBF SVM",
+                # "Gaussian Process",
+                "Decision Tree",
+                "Random Forest",
+                "Neural Net",
+                "AdaBoost",
+                "Naive Bayes",
+                "QDA"
+            ],
+            "default": 100,
+            "threshold": 0.6
         }
     '''
     def learn(self, fname):
@@ -208,11 +242,22 @@ class AI(object):
 
         with open(fname, 'r') as csvfile:
             # if file does not exist, simply ignore it
-            jsonfname = 'filter.json'
+            jsonfname = 'settings.json'
             try:
-                filter = json.load(open(jsonfname))
+                settings = json.load(open(jsonfname))
             except:
                 pass
+
+            # set default value
+            try:
+                self.default_value = float(settings["default"])
+            except:
+                self.default_value = 0
+            # set threshold
+            try:
+                self.threshold = float(settings["threshold"])
+            except:
+                self.threshold = 0.6
 
             # always include the location
             reader = csv.reader(csvfile, delimiter=',')
@@ -224,13 +269,13 @@ class AI(object):
             for i, column in enumerate(fullheader):
                 # try if whitelist if available
                 try:
-                    if column in filter["whitelist"]:
+                    if column in settings["whitelist"]:
                         columns.append(i)
                         self.header.append(column)
                 except:
                     # if not, try to use blacklist
                     try:
-                        if column not in filter["blacklist"]:
+                        if column not in settings["blacklist"]:
                             columns.append(i)
                             self.header.append(column)
                     except:
@@ -252,7 +297,7 @@ class AI(object):
                         new_row.append(self.naming['from'][val])
                         continue
                     if val == '':
-                        new_row.append(0)
+                        new_row.append(self.default_value)
                         continue
                     try:
                         new_row.append(float(val))
@@ -260,8 +305,9 @@ class AI(object):
                         self.logger.error(
                             "problem parsing value " + str(val))
                 if(len(new_row) != len(self.header)):
-                    self.logger.error("Row size(%) should be the same as header size(%d)" % (len(new_row), len(self.header)))
+                    self.logger.error("Row size(%d) should be the same as header size(%d)" % (len(new_row), len(self.header)))
                 rows.append(new_row)
+                self.logger.debug("row %d: %s" % (i, new_row))
 
         # first column in row is the classification, Y
         y = numpy.zeros(len(rows))
@@ -274,29 +320,63 @@ class AI(object):
             y[i] = rows[i][0]
             x[i, :] = numpy.array(rows[i][1:])
 
-        names = [
-            "Nearest Neighbors",
-            "Linear SVM",
-            "RBF SVM",
-            # "Gaussian Process",
-            "Decision Tree",
-            "Random Forest",
-            "Neural Net",
-            "AdaBoost",
-            "Naive Bayes",
-            "QDA"]
-        classifiers = [
-            KNeighborsClassifier(3),
-            SVC(kernel="linear", C=0.025, probability=True),
-            SVC(gamma=2, C=1, probability=True),
-            # GaussianProcessClassifier(1.0 * RBF(1.0), warm_start=True),
-            DecisionTreeClassifier(max_depth=5),
-            RandomForestClassifier(
-                max_depth=5, n_estimators=10, max_features=1),
-            MLPClassifier(alpha=1),
-            AdaBoostClassifier(),
-            GaussianNB(),
-            QuadraticDiscriminantAnalysis()]
+        names = []
+        classifiers = []
+
+        try:
+            if "Nearest Neighbors" in settings["models"]:
+                names.append("Nearest Neighbors")
+                classifiers.append(KNeighborsClassifier(3))
+            elif "Linear SVM" in settings["models"]:
+                names.append("Linear SVM")
+                classifiers.append(SVC(kernel="linear", C=0.025, probability=True))
+            elif "RBF SVM" in settings["models"]:
+                names.append("RBF SVM")
+                classifiers.append(SVC(gamma=2, C=1, probability=True))
+            elif "Decision Tree" in settings["models"]:
+                names.append("Decision Tree")
+                classifiers.append(DecisionTreeClassifier(max_depth=5))
+            elif "Random Forest" in settings["models"]:
+                names.append("Random Forest")
+                classifiers.append(RandomForestClassifier(max_depth=5, n_estimators=10, max_features=1))
+            elif "Neural Net" in settings["models"]:
+                names.append("Neural Net")
+                classifiers.append(MLPClassifier(alpha=1))
+            elif "AdaBoost" in settings["models"]:
+                names.append("AdaBoost")
+                classifiers.append(AdaBoostClassifier())
+            elif "Naive Bayes" in settings["models"]:
+                names.append("Naive Bayes")
+                classifiers.append(GaussianNB())
+            elif "QDA" in settings["models"]:
+                names.append("QDA")
+                classifiers.append(QuadraticDiscriminantAnalysis())
+        except:
+            names = [
+                "Nearest Neighbors",
+                "Linear SVM",
+                "RBF SVM",
+                # "Gaussian Process",
+                "Decision Tree",
+                "Random Forest",
+                "Neural Net",
+                "AdaBoost",
+                "Naive Bayes",
+                "QDA"]
+            classifiers = [
+                KNeighborsClassifier(3),
+                SVC(kernel="linear", C=0.025, probability=True),
+                SVC(gamma=2, C=1, probability=True),
+                # GaussianProcessClassifier(1.0 * RBF(1.0), warm_start=True),
+                DecisionTreeClassifier(max_depth=5),
+                RandomForestClassifier(
+                    max_depth=5, n_estimators=10, max_features=1),
+                MLPClassifier(alpha=1),
+                AdaBoostClassifier(),
+                GaussianNB(),
+                QuadraticDiscriminantAnalysis()]
+
+        self.logger.debug("Using %d models: %s" % (len(names), names))
         self.algorithms = {}
         # split_for_learning = int(0.70 * len(y))
         for name, clf in zip(names, classifiers):
