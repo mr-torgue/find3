@@ -92,10 +92,10 @@ class AI(object):
 
         # try to load, set to default values otherwise
         try:
-            defaul_value = self.default_value
+            default_value = self.default_value
             threshold = self.threshold
         except:
-            defaul_value = 0
+            default_value = 0
             threshold = 0.6
 
         header = self.header[1:]
