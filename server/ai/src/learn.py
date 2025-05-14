@@ -13,6 +13,7 @@ import math
 from threading import Thread
 import functools
 import multiprocessing
+import os
 
 # create logger with 'spam_application'
 logger = logging.getLogger('learn')
@@ -88,9 +89,18 @@ class AI(object):
     2. ignore data that see less than x percent of the access points (specified by self.threshold)
     '''
     def classify(self, sensor_data):
+
+        # try to load, set to default values otherwise
+        try:
+            defaul_value = self.default_value
+            threshold = self.threshold
+        except:
+            defaul_value = 0
+            threshold = 0.6
+
         header = self.header[1:]
         is_unknown = True
-        csv_data = numpy.full(len(header), self.default_value)
+        csv_data = numpy.full(len(header), default_value)
         for sensorType in sensor_data['s']:
             for sensor in sensor_data['s'][sensorType]:
                 sensorName = sensorType + "-" + sensor
@@ -104,7 +114,7 @@ class AI(object):
         self.logger.debug("Using %d features to classify!" % len(header))
         payload = {'location_names': self.naming['to'], 'predictions': []}
         # check if most values have been set
-        if(float(numpy.count_nonzero(csv_data == self.default_value)) / len(header) >= self.threshold):
+        if(float(numpy.count_nonzero(csv_data == default_value)) / len(header) >= threshold):
 
             threads = [None]*len(self.algorithms)
             self.results = [None]*len(self.algorithms)
@@ -245,7 +255,8 @@ class AI(object):
             jsonfname = 'settings.json'
             try:
                 settings = json.load(open(jsonfname))
-            except:
+            except Exception as e:
+                self.logger.error("Could not load json settings file: %s\nCurrent working directory: %s" % (e, os.getcwd()))
                 pass
 
             # set default value
