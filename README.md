@@ -9,6 +9,58 @@
 
 > This version, 3.X, is a complete re-write of the [previous versions 2.x](https://github.com/schollz/find).
 
+# Notes
+This version needs to be installed with:
+```
+wget https://raw.githubusercontent.com/mr-torgue/find3/master/Dockerfile
+docker build -t schollz/find3 .
+```
+Running it:
+```
+docker run -p 1884:1883 -p 8005:8003 \
+-v /home/dev/FIND_DATA:/data \
+-v /home/dev/settings.json:/app/ai/src/settings.json \
+-e MQTT_ADMIN=ADMIN \
+-e MQTT_PASS=PASSWORD \
+-e MQTT_SERVER='localhost:1883' \
+-e MQTT_EXTERNAL='your public IP' \
+-e MQTT_PORT=1884 \
+--name find3server -d -t schollz/find3
+```
+
+The settings file has the following structure:
+```
+{
+    "whitelist": 
+    [
+        "wifi-38:91:b7:1a:22:ec",
+        "wifi-38:91:b7:1a:22:e2",
+        ...
+    ],
+    "blacklist":
+    [
+        "wifi-38:91:b7:1a:22:ec",
+        ...
+    ],
+    "models":
+    [
+        "Nearest Neighbors",
+        "Linear SVM",
+        "RBF SVM",
+        # "Gaussian Process",
+        "Decision Tree",
+        "Random Forest",
+        "Neural Net",
+        "AdaBoost",
+        "Naive Bayes",
+        "QDA"
+    ],
+    "default": 100,
+    "threshold": 0.6
+}
+```
+An example is provided.
+
 # About the project
 
 This repository is a complete re-write of the previous version of FIND ([github.com/schollz/find](https://github.com/schollz/find)). There are notable improvements from the previous version:
