@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  find3server: 
+    #name: find3server
+    build: .
+    ports:
+      - "1884:1883" 
+      - "8005:8003" 
+    environment:
+      - MQTT_ADMIN:ADMIN
+      - MQTT_PASS:PASSWORD
+      - MQTT_SERVER:'localhost:1883'
+      - MQTT_EXTERNAL:'10.0.0.13'
+      - MQTT_PORT:1884
+    volumes: 
+      - /home/raaise/FIND_DATA:/data
+      - /home/raaise/filter-2.4.json:/app/ai/src/settings.json
+
