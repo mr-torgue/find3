@@ -308,8 +308,11 @@ class AI(object):
                         columns.append(i)
                         self.header.append(column)
             self.logger.debug("Using %d features for the AI: %s" % (len(self.header), self.header))
-
+            
+            count_all = 0
+            count_skipped = 0
             for i, row in enumerate(reader):
+                count_all += 1
                 new_row = []
                 for j in columns:
                     val = row[j]
@@ -333,7 +336,10 @@ class AI(object):
                     self.logger.error("Row size(%d) should be the same as header size(%d)" % (len(new_row), len(self.header)))
                 if(float(numpy.count_nonzero(new_row == default_value)) / len(header) >= threshold):
                     rows.append(new_row)
+                else:
+                    count_skipped += 1
                 self.logger.debug("row %d: %s" % (i, new_row))
+        self.logger.debug("Total rows: %d, skipped %d" % (count_all, count_skipped))
 
         # first column in row is the classification, Y
         y = numpy.zeros(len(rows))
