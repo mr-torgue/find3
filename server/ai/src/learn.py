@@ -334,7 +334,7 @@ class AI(object):
                             "problem parsing value " + str(val))
                 if(len(new_row) != len(self.header)):
                     self.logger.error("Row size(%d) should be the same as header size(%d)" % (len(new_row), len(self.header)))
-                if(float(numpy.count_nonzero(new_row == default_value)) / len(header) >= threshold):
+                if(float(numpy.count_nonzero(new_row == self.default_value)) / len(header) >= threshold):
                     rows.append(new_row)
                 else:
                     count_skipped += 1
