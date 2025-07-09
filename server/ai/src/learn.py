@@ -109,7 +109,21 @@ class AI(object):
                     csv_data[header.index(sensorName)] = sensor_data['s'][sensorType][sensor]
         
         self.headerClassify = header
-        self.csv_dataClassify = csv_data.reshape(1, -1)
+         # self.csv_dataClassify = csv_data.reshape(1, -1)  # [Abhishek | 09-07-2025] original line commented
+
+                # === [Abhishek | 09-07-2025] Apply missing value filter and mean imputation ===
+        x_vec = csv_data
+        num_defaults = numpy.count_nonzero(x_vec == default_value)
+        if num_defaults > 3:
+            self.logger.warning("Skipping classification: too many missing values (%d)" % num_defaults)
+            payload['is_unknown'] = True
+            return payload
+
+        # Replace default (-100) values with mean per AP
+        x_vec = numpy.where(x_vec == default_value, self.mean_per_ap, x_vec)
+        self.csv_dataClassify = x_vec.reshape(1, -1)
+        # === End of filter logic ===
+
 
         self.logger.debug("Using %d features to classify!" % len(header))
         payload = {'location_names': self.naming['to'], 'predictions': []}
@@ -401,6 +415,15 @@ class AI(object):
                     name, int(1000 * (t2 - time.time()))))
             except Exception as e:
                 self.logger.error("{} {}".format(name, str(e)))
+
+        # === [Abhishek | 09-07-2025] Compute mean RSSI per AP after training ===
+        self.mean_per_ap = numpy.mean(
+            numpy.where(x == self.default_value, numpy.nan, x), axis=0
+        )
+        self.mean_per_ap = numpy.where(
+            numpy.isnan(self.mean_per_ap), self.default_value, self.mean_per_ap
+        )
+        # === End of mean_per_ap computation ===
 
         # t2 = time.time()
         # name = "Extended Naive Bayes"
