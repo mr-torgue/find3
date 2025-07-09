@@ -338,6 +338,15 @@ class AI(object):
         y = numpy.zeros(len(rows))
         x = numpy.zeros((len(rows), len(rows[0]) - 1))
 
+         # === [Abhishek | 09-07-2025] Compute mean RSSI per AP after training ===
+        self.mean_per_ap = numpy.mean(
+            numpy.where(x == self.default_value, numpy.nan, x), axis=0
+        )
+        self.mean_per_ap = numpy.where(
+            numpy.isnan(self.mean_per_ap), self.default_value, self.mean_per_ap
+        )
+        # === End of mean_per_ap computation ===
+
         # shuffle it up for training
         record_range = list(range(len(rows)))
         shuffle(record_range)
@@ -416,14 +425,6 @@ class AI(object):
             except Exception as e:
                 self.logger.error("{} {}".format(name, str(e)))
 
-        # === [Abhishek | 09-07-2025] Compute mean RSSI per AP after training ===
-        self.mean_per_ap = numpy.mean(
-            numpy.where(x == self.default_value, numpy.nan, x), axis=0
-        )
-        self.mean_per_ap = numpy.where(
-            numpy.isnan(self.mean_per_ap), self.default_value, self.mean_per_ap
-        )
-        # === End of mean_per_ap computation ===
 
         # t2 = time.time()
         # name = "Extended Naive Bayes"
