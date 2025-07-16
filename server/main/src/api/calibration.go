@@ -34,6 +34,7 @@ func Calibrate(family string, crossValidation ...bool) (err error) {
 	db.Close()
 
 	datasLearn, datasTest, err := splitDataForLearning(datas, crossValidation...)
+	logger.Log.Infof("[%s] splitting %d fingerprints to learn (%d) and test (%d)", datas[0].Family, len(datas), len(datasLearn), len(datasTest))
 	if err != nil {
 		return
 	}
@@ -78,9 +79,10 @@ func splitDataForLearning(datas []models.SensorData, crossValidation ...bool) (d
 			j := rand.Intn(i + 1)
 			datas[i], datas[j] = datas[j], datas[i]
 		}
-		if len(datas) > 1000 {
-			datas = datas[:1000]
-		}
+		// FH: removed this, why would you want to do this?
+		//if len(datas) > 1000 {
+		//	datas = datas[:1000]
+		//}
 
 		// triage into different locations
 		dataLocations := make(map[string][]int)
