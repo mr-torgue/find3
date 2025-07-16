@@ -359,8 +359,9 @@ class AI(object):
         self.mean_per_ap = numpy.mean(
             numpy.where(x == self.default_value, numpy.nan, x), axis=0
         )
-        self.mean_per_ap = numpy.where(
+        ''' self.mean_per_ap = numpy.where(
             numpy.isnan(self.mean_per_ap), self.default_value, self.mean_per_ap
+        '''
         )
         # === End of mean_per_ap computation ===
 
