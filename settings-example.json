@@ -18,5 +18,6 @@
         "QDA"
     ],
     "default": -100,
-    "threshold": 0.6
+    "threshold": 0.6,
+    "mode": "mean or default_value"
 }
