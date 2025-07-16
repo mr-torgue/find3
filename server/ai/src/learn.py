@@ -129,8 +129,8 @@ class AI(object):
 
         self.logger.debug("Using %d features to classify!" % len(header))
         payload = {'location_names': self.naming['to'], 'predictions': []}
-        # check if most values have been set
-        if(float(numpy.count_nonzero(csv_data == default_value)) / len(header) < threshold):
+        # check if most values have been set (is it len(header) or len(header) - 1)
+        if(sum(d == default_value for d in csv_data) / len(header) < threshold):
 
             threads = [None]*len(self.algorithms)
             self.results = [None]*len(self.algorithms)
@@ -336,7 +336,7 @@ class AI(object):
                             "problem parsing value " + str(val))
                 if(len(new_row) != len(self.header)):
                     self.logger.error("Row size(%d) should be the same as header size(%d)" % (len(new_row), len(self.header)))
-                if(float(numpy.count_nonzero(new_row == self.default_value)) / (len(self.header) - 1) < self.threshold):
+                if(sum(d == self.default_value for d in new_row) / (len(self.header) - 1) < self.threshold):
                     rows.append(new_row)
                 else:
                     count_skipped += 1
