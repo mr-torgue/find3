@@ -371,7 +371,7 @@ class AI(object):
                 	x_room = x[mask]
                 	room_means = numpy.nanmean(x_room, axis=0)
                 	x[mask] = numpy.where(numpy.isnan(x_room), room_means, x_room)
-                	self.logger.debug("Mean per column: %s" % (room_means))
+                	self.logger.debug("Mean per column: %s for room %d" % (room_means, room))
         except:
             None
         self.logger.debug("x: %s" % (x))
