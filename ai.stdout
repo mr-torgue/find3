@@ -1,0 +1,43 @@
+rm -rf __pycache__*
+rm -rf src/__pycache__*
+rm -rf venv/*
+export LC_ALL=C.UTF-8 && \
+export LANG=C.UTF-8 && \
+export FLASK_APP=server.py && \
+export FLASK_DEBUG=0 && \
+cd src && \
+flask run --port 8002
+ * Serving Flask app "server.py"
+ * Environment: production
+   WARNING: Do not use the development server in a production environment.
+   Use a production WSGI server instead.
+ * Debug mode: off
+Makefile:10: recipe for target 'production' failed
+rm -rf __pycache__*
+rm -rf src/__pycache__*
+rm -rf venv/*
+export LC_ALL=C.UTF-8 && \
+export LANG=C.UTF-8 && \
+export FLASK_APP=server.py && \
+export FLASK_DEBUG=0 && \
+cd src && \
+flask run --port 8002
+ * Serving Flask app "server.py"
+ * Environment: production
+   WARNING: Do not use the development server in a production environment.
+   Use a production WSGI server instead.
+ * Debug mode: off
+rm -rf __pycache__*
+rm -rf src/__pycache__*
+rm -rf venv/*
+export LC_ALL=C.UTF-8 && \
+export LANG=C.UTF-8 && \
+export FLASK_APP=server.py && \
+export FLASK_DEBUG=0 && \
+cd src && \
+flask run --port 8002
+ * Serving Flask app "server.py"
+ * Environment: production
+   WARNING: Do not use the development server in a production environment.
+   Use a production WSGI server instead.
+ * Debug mode: off
