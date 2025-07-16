@@ -353,18 +353,16 @@ class AI(object):
         for i in record_range:
             y[i] = rows[i][0]
             x[i, :] = numpy.array(rows[i][1:])
-
         
-         # === [Abhishek | 09-07-2025] Compute mean RSSI per AP after training ===
-        self.mean_per_ap = numpy.mean(
-            numpy.where(x == self.default_value, numpy.nan, x), axis=0
-        )
-        ''' self.mean_per_ap = numpy.where(
-            numpy.isnan(self.mean_per_ap), self.default_value, self.mean_per_ap
-        '''
-        )
-        # === End of mean_per_ap computation ===
-
+        if settings["mode"] == "mean":
+            # === [Abhishek | 09-07-2025] Compute mean RSSI per AP after training ===
+            x = numpy.where(x == self.default_value, numpy.nan, x)
+            self.mean_per_ap = numpy.nanmean(x, axis=0)
+            x = numpy.where(numpy.isnan(x), self.mean_per_ap, x)
+            self.logger.debug("Mean per column: %s" % (self.mean_per_ap))
+            # === End of mean_per_ap computation ===
+        self.logger.debug("x: %s" % (x))
+        
         names = []
         classifiers = []
 
