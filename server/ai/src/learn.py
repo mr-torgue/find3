@@ -340,7 +340,7 @@ class AI(object):
                     rows.append(new_row)
                 else:
                     count_skipped += 1
-                self.logger.debug("row %d: %s" % (i, new_row))
+                #self.logger.debug("row %d: %s" % (i, new_row))
         self.logger.debug("Total rows: %d, skipped %d" % (count_all, count_skipped))
 
         # first column in row is the classification, Y
