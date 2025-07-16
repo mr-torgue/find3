@@ -1,0 +1,28 @@
+{
+    "whitelist": [
+        "wifi-5e:62:8b:28:93:ae", // a03
+        "wifi-5e:62:8b:28:95:da", // a17
+	"wifi-5e:62:8b:28:97:ae", // a13
+	"wifi-5e:62:8b:28:98:fa", // a06
+	"wifi-5e:62:8b:28:99:e2", // a07
+	"wifi-5e:62:8b:28:93:af", // a03
+        "wifi-5e:62:8b:28:95:db", // a17
+	"wifi-5e:62:8b:28:97:af", // a13
+	"wifi-5e:62:8b:28:98:fb", // a06
+	"wifi-5e:62:8b:28:99:e3" // a07
+    ],
+    "models":
+    [
+        "Nearest Neighbors",
+        "Linear SVM",
+        "RBF SVM",
+        "Decision Tree",
+        "Random Forest",
+        "Neural Net",
+        "AdaBoost",
+        "Naive Bayes",
+        "QDA"
+    ],
+    "default": -100,
+    "threshold": 0.6
+}
