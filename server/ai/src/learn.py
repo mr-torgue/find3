@@ -347,6 +347,14 @@ class AI(object):
         y = numpy.zeros(len(rows))
         x = numpy.zeros((len(rows), len(rows[0]) - 1))
 
+        # shuffle it up for training
+        record_range = list(range(len(rows)))
+        shuffle(record_range)
+        for i in record_range:
+            y[i] = rows[i][0]
+            x[i, :] = numpy.array(rows[i][1:])
+
+        
          # === [Abhishek | 09-07-2025] Compute mean RSSI per AP after training ===
         self.mean_per_ap = numpy.mean(
             numpy.where(x == self.default_value, numpy.nan, x), axis=0
@@ -355,13 +363,6 @@ class AI(object):
             numpy.isnan(self.mean_per_ap), self.default_value, self.mean_per_ap
         )
         # === End of mean_per_ap computation ===
-
-        # shuffle it up for training
-        record_range = list(range(len(rows)))
-        shuffle(record_range)
-        for i in record_range:
-            y[i] = rows[i][0]
-            x[i, :] = numpy.array(rows[i][1:])
 
         names = []
         classifiers = []
