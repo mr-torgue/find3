@@ -356,16 +356,18 @@ class AI(object):
         
         try:
             if settings["mode"] == "mean":
-            x = numpy.where(x == self.default_value, numpy.nan, x)
-            
-            rooms = numpy.unique(y)
-            for room in rooms:
-                mask = y == room
-                x_room = x[mask]
-                if numpy.isnan(x_room).all(): continue  # Skip if room has only default values
-                room_means = numpy.nanmean(x_room, axis=0)
-                x[mask] = numpy.where(numpy.isnan(x_room), room_means, x_room)
-                self.logger.debug("Mean per column: %s for room %d" % (room_means, room))
+                x = numpy.where(x == self.default_value, numpy.nan, x)
+                
+                rooms = numpy.unique(y)
+                for room in rooms:
+                    mask = y == room
+                    x_room = x[mask]
+                    if numpy.isnan(x_room).all():   
+                        x[mask] = self.default_value
+                    else:
+                        room_means = numpy.nanmean(x_room, axis=0)
+                        x[mask] = numpy.where(numpy.isnan(x_room), room_means, x_room)
+                        self.logger.debug("Mean per column: %s for room %d" % (room_means, room))
 
         except Exception as e:
             print("An exception occurred: %s" % (e))
