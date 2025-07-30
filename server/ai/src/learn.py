@@ -374,7 +374,7 @@ class AI(object):
                 	self.logger.debug("Mean per column: %s for room %d" % (room_means, room))
         except Exception as e:
             print("An exception occurred: %s" % (e))
-        self.logger.debug("x: %s\ncontains nan: %s" % (x, numpy.isnan(x).any())
+        self.logger.debug("x: %s\ncontains nan: %s" % (x, numpy.isnan(x).any()))
         
         names = []
         classifiers = []
