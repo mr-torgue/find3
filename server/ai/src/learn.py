@@ -372,9 +372,9 @@ class AI(object):
                 	room_means = numpy.nanmean(x_room, axis=0)
                 	x[mask] = numpy.where(numpy.isnan(x_room), room_means, x_room)
                 	self.logger.debug("Mean per column: %s for room %d" % (room_means, room))
-        except:
-            None
-        self.logger.debug("x: %s" % (x))
+        except Exception as e:
+            print("An exception occurred: %s" % (e))
+        self.logger.debug("x: %s\ncontains nan: %s" % (x, numpy.isnan(x).any())
         
         names = []
         classifiers = []
