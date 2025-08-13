@@ -46,6 +46,20 @@ from sklearn.neighbors import kneighbors_graph
 from naive_bayes import ExtendedNaiveBayes
 from naive_bayes2 import ExtendedNaiveBayes2
 
+# =============================================================================
+# RSSI constants & helpers
+# -----------------------------------------------------------------------------
+# [OLD] (none)
+# [Abhi | 2025-08-13] Add consistent RSSI handling constants + scaler
+ABSENT_RSSI = -100.0
+CLIP_MIN, CLIP_MAX = -95.0, -30.0
+
+def clip_scale_array(a):
+    """Clip RSSI to [CLIP_MIN, CLIP_MAX] and scale to 0..1."""
+    a = numpy.clip(a, CLIP_MIN, CLIP_MAX)
+    return (a - CLIP_MIN) / (CLIP_MAX - CLIP_MIN)
+# =============================================================================
+
 
 def timeout(timeout):
     def deco(func):
@@ -76,11 +90,13 @@ def timeout(timeout):
 
 class AI(object):
 
-    def __init__(self, family, path_to_data):
+    def __init__(self, family=None, path_to_data=None):  # [Abhi | 2025-08-13] keep defaults to avoid caller errors
         self.logger = logging.getLogger('learn.AI')
         self.naming = {'from': {}, 'to': {}}
         self.family = family
         self.path_to_data = path_to_data
+        # [Abhi | 2025-08-13] will be set during learn()
+        self.global_means = None
 
 
     ''' changes Folmer 14-05-2025
@@ -95,43 +111,63 @@ class AI(object):
             default_value = self.default_value
             threshold = self.threshold
         except:
-            default_value = 0
+            # default_value = 0                # [OLD]
+            # [Abhi | 2025-08-13] Make sane fallbacks
+            default_value = ABSENT_RSSI
             threshold = 0.6
 
-        header = self.header[1:]
-        is_unknown = True
-        csv_data = numpy.full(len(header), default_value)
-        for sensorType in sensor_data['s']:
+        # header = self.header[1:]             # [OLD]
+        header = self.header[1:]  # [Abhi | 2025-08-13] same
+
+        # is_unknown = True                     # [OLD]
+        is_unknown = True                      # [Abhi | 2025-08-13] same
+
+        # csv_data = numpy.full(len(header), default_value)     # [OLD]
+        # for sensorType in sensor_data['s']:
+        #     for sensor in sensor_data['s'][sensorType]:
+        #         sensorName = sensorType + "-" + sensor
+        #         if sensorName in header:
+        #             is_unknown = False
+        #             csv_data[header.index(sensorName)] = sensor_data['s'][sensorType][sensor]
+        # self.headerClassify = header
+        # self.csv_dataClassify = csv_data.reshape(1, -1)
+
+        # [Abhi | 2025-08-13] Consistent inference vector: start at ABSENT_RSSI, fill, gate, impute, normalize
+        x_vec = numpy.full(len(header), ABSENT_RSSI, dtype=float)
+        for sensorType in sensor_data.get('s', {}):
             for sensor in sensor_data['s'][sensorType]:
                 sensorName = sensorType + "-" + sensor
                 if sensorName in header:
                     is_unknown = False
-                    csv_data[header.index(sensorName)] = sensor_data['s'][sensorType][sensor]
-        
-        self.headerClassify = header
-        self.csv_dataClassify = csv_data.reshape(1, -1)
-         # self.csv_dataClassify = csv_data.reshape(1, -1)  # [Abhishek | 09-07-2025] original line commented
-        
-        '''
-        # === [Abhishek | 09-07-2025] Apply missing value filter and mean imputation ===
-        x_vec = csv_data
-        num_defaults = numpy.count_nonzero(x_vec == default_value)
-        if num_defaults > 3:
-            self.logger.warning("Skipping classification: too many missing values (%d)" % num_defaults)
-            payload['is_unknown'] = True
+                    try:
+                        x_vec[header.index(sensorName)] = float(sensor_data['s'][sensorType][sensor])
+                    except Exception:
+                        pass
+
+        # [Abhi | 2025-08-13] Hard missing gate: skip if too many missing
+        num_absent = int(numpy.sum(x_vec <= ABSENT_RSSI))
+        if num_absent > 3:
+            payload = {'location_names': self.naming['to'], 'predictions': [], 'is_unknown': True}
             return payload
 
-        # Replace default (-100) values with mean per AP
-        x_vec = numpy.where(x_vec == default_value, self.mean_per_ap, x_vec)
+        # [Abhi | 2025-08-13] Impute remaining missings with global means learned during train()
+        if getattr(self, 'global_means', None) is not None:
+            mask_absent = (x_vec <= ABSENT_RSSI)
+            x_vec[mask_absent] = self.global_means[mask_absent]
+
+        # [Abhi | 2025-08-13] Clip + normalize to 0..1
+        x_vec = clip_scale_array(x_vec)
+
+        self.headerClassify = header
         self.csv_dataClassify = x_vec.reshape(1, -1)
-        # === End of filter logic ===
-        '''
 
-        self.logger.debug("Using %d features to classify!" % len(header))
+        self.logger.debug("Using %d features to classify!", len(header))
         payload = {'location_names': self.naming['to'], 'predictions': []}
-        # check if most values have been set (is it len(header) or len(header) - 1)
-        if(sum(d == default_value for d in csv_data) / len(header) < threshold):
 
+        # check if most values have been set (is it len(header) or len(header) - 1)
+        # if(sum(d == default_value for d in csv_data) / len(header) < threshold):   # [OLD]
+        # [Abhi | 2025-08-13] We already gated on missing count; keep threshold logic using ABSENT_RSSI basis
+        if (num_absent / max(1, len(header))) < threshold:
             threads = [None]*len(self.algorithms)
             self.results = [None]*len(self.algorithms)
 
@@ -180,38 +216,6 @@ class AI(object):
         if badValue:
             return
 
-        # try:
-        #     t2 = time.time()
-        #     name = "Extended Naive Bayes"
-        #     clf = ExtendedNaiveBayes(self.family,path_to_data=self.path_to_data)
-        #     predictions = clf.predict_proba(header,csv_data)
-        #     predict_payload = {'name': name,'locations': [], 'probabilities': []}
-        #     for tup in predictions:
-        #         predict_payload['locations'].append(str(self.naming['from'][tup[0]]))
-        #         predict_payload['probabilities'].append(round(tup[1],2))
-        #     payload['predictions'].append(predict_payload)
-        #     self.logger.debug("{} {:d} ms".format(name,int(1000 * (t2 - time.time()))))
-        # except Exception as e:
-        #     self.logger.error(str(e))
-
-        # try:
-        #     t2 = time.time()
-        #     name = "Extended Naive Bayes2"
-        #     clf = ExtendedNaiveBayes2(self.family, path_to_data=self.path_to_data)
-        #     predictions = clf.predict_proba(header, csv_data)
-        #     predict_payload = {'name': name, 'locations': [], 'probabilities': []}
-        #     for tup in predictions:
-        #         predict_payload['locations'].append(
-        #             str(self.naming['from'][tup[0]]))
-        #         predict_payload['probabilities'].append(round(tup[1], 2))
-        #     payload['predictions'].append(predict_payload)
-        #     self.logger.debug("{} {:d} ms".format(
-        #         name, int(1000 * (t2 - time.time()))))
-        # except Exception as e:
-        #     self.logger.error(str(e))
-
-        # self.logger.debug("{} {:d} ms".format(
-        #     name, int(1000 * (t - time.time()))))
         self.results[index] = predict_payload
 
     @timeout(10)
@@ -273,13 +277,19 @@ class AI(object):
                 settings = json.load(open(jsonfname))
             except Exception as e:
                 self.logger.error("Could not load json settings file: %s\nCurrent working directory: %s" % (e, os.getcwd()))
-                pass
+                settings = {}  # [Abhi | 2025-08-13] ensure dict
 
             # set default value
+            # try:
+            #     self.default_value = float(settings["default"])
+            # except:
+            #     self.default_value = 0
+            # [Abhi | 2025-08-13] Use ABSENT_RSSI as default when not provided
             try:
                 self.default_value = float(settings["default"])
             except:
-                self.default_value = 0
+                self.default_value = ABSENT_RSSI
+
             # set threshold
             try:
                 self.threshold = float(settings["threshold"])
@@ -299,16 +309,18 @@ class AI(object):
                     if column in settings["whitelist"]:
                         columns.append(i)
                         self.header.append(column)
+                        continue  # [Abhi | 2025-08-13] skip blacklist if whitelisted
                 except:
-                    # if not, try to use blacklist
-                    try:
-                        if column not in settings["blacklist"]:
-                            columns.append(i)
-                            self.header.append(column)
-                    except:
-                        # no white- or blacklist, just use it
-                        columns.append(i)
-                        self.header.append(column)
+                    pass
+                # if not, try to use blacklist
+                try:
+                    if "blacklist" in settings and column in settings["blacklist"]:
+                        continue
+                except:
+                    pass
+                # no white- or blacklist include it
+                columns.append(i)
+                self.header.append(column)
             self.logger.debug("Using %d features for the AI: %s" % (len(self.header), self.header))
             
             count_all = 0
@@ -320,6 +332,14 @@ class AI(object):
                     val = row[j]
                     if j == 0:
                         # this is a name of the location
+                        # if val not in self.naming['from']:                   # [OLD]
+                        #     self.naming['from'][val] = naming_num
+                        #     self.naming['to'][naming_num] = val
+                        #     naming_num += 1
+                        #     new_row.append(self.naming['from'][val])
+                        #     continue
+                        # [Abhi | 2025-08-13] normalize labels (e.g., a01->A01)
+                        val = val.strip().upper()
                         if val not in self.naming['from']:
                             self.naming['from'][val] = naming_num
                             self.naming['to'][naming_num] = val
@@ -336,7 +356,12 @@ class AI(object):
                             "problem parsing value " + str(val))
                 if(len(new_row) != len(self.header)):
                     self.logger.error("Row size(%d) should be the same as header size(%d)" % (len(new_row), len(self.header)))
-                if(sum(d == self.default_value for d in new_row) / (len(self.header) - 1) < self.threshold):
+                # if(sum(d == self.default_value for d in new_row) / (len(self.header) - 1) < self.threshold):  # [OLD]
+                #     rows.append(new_row)
+                # else:
+                #     count_skipped += 1
+                # [Abhi | 2025-08-13] Use ABSENT_RSSI gate; keep same semantics
+                if (sum(d <= ABSENT_RSSI for d in new_row[1:]) / (len(self.header) - 1)) < self.threshold:
                     rows.append(new_row)
                 else:
                     count_skipped += 1
@@ -354,54 +379,98 @@ class AI(object):
             y[i] = rows[i][0]
             x[i, :] = numpy.array(rows[i][1:])
         
+        # try:
+        #     if settings["mode"] == "mean":
+        #         x = numpy.where(x == self.default_value, numpy.nan, x)
+        #         
+        #         rooms = numpy.unique(y)
+        #         for room in rooms:
+        #             mask = y == room
+        #             x_room = x[mask]
+        #             if numpy.isnan(x_room).all():   
+        #                 x[mask] = self.default_value
+        #             else:
+        #                 room_means = numpy.nanmean(x_room, axis=0)
+        #                 x[mask] = numpy.where(numpy.isnan(x_room), room_means, x_room)
+        #                 self.logger.debug("Mean per column: %s for room %d" % (room_means, room))
+        #
+        # except Exception as e:
+        #     print("An exception occurred: %s" % (e))
+        # self.logger.debug("x: %s\ncontains nan: %s" % (x, numpy.isnan(x).any()))
+
+        # [Abhi | 2025-08-13] Unified imputation + normalization (room means -> global means -> clip/scale)
         try:
-            if settings["mode"] == "mean":
-                x = numpy.where(x == self.default_value, numpy.nan, x)
-                
+            # 1) mark absents as NaN for stats
+            x_nan = numpy.where(x <= ABSENT_RSSI, numpy.nan, x)
+
+            # 2) optional per-room mean imputation
+            use_room_mean = False
+            try:
+                use_room_mean = (settings.get("mode", "").lower() == "mean")
+            except Exception:
+                pass
+
+            if use_room_mean:
                 rooms = numpy.unique(y)
                 for room in rooms:
-                    mask = y == room
-                    x_room = x[mask]
-                    if numpy.isnan(x_room).all():   
-                        x[mask] = self.default_value
-                    else:
-                        room_means = numpy.nanmean(x_room, axis=0)
-                        x[mask] = numpy.where(numpy.isnan(x_room), room_means, x_room)
-                        self.logger.debug("Mean per column: %s for room %d" % (room_means, room))
+                    mask = (y == room)
+                    x_room = x_nan[mask]
+                    if numpy.isnan(x_room).all():
+                        continue
+                    room_means = numpy.nanmean(x_room, axis=0)
+                    x_nan[mask] = numpy.where(numpy.isnan(x_room), room_means, x_room)
+                    self.logger.debug("Room %s mean imputed.", str(room))
+
+            # 3) global means across all rows
+            global_means = numpy.nanmean(x_nan, axis=0)
+            global_means = numpy.where(numpy.isnan(global_means), ABSENT_RSSI, global_means)
+
+            # 4) fill remaining NaNs with global means
+            x_filled = numpy.where(numpy.isnan(x_nan), global_means, x_nan)
+
+            # 5) clip + normalize to 0..1
+            x_norm = clip_scale_array(x_filled)
+
+            # 6) stash for inference
+            self.global_means = global_means
+
+            self.logger.debug("Training matrix normalized. Any NaN left? %s", numpy.isnan(x_norm).any())
+            x = x_norm
 
         except Exception as e:
-            print("An exception occurred: %s" % (e))
-        self.logger.debug("x: %s\ncontains nan: %s" % (x, numpy.isnan(x).any()))
+            self.logger.error("Imputation/normalization error: %s", e)
         
         names = []
         classifiers = []
 
         try:
-            if "Nearest Neighbors" in settings["models"]:
+            if "Nearest Neighbors" in settings.get("models", []):
                 names.append("Nearest Neighbors")
-                classifiers.append(KNeighborsClassifier(3))
-            if "Linear SVM" in settings["models"]:
+                # classifiers.append(KNeighborsClassifier(3))  # [OLD]
+                classifiers.append(KNeighborsClassifier(n_neighbors=5, weights='distance'))  # [Abhi | 2025-08-13]
+            if "Linear SVM" in settings.get("models", []):
                 names.append("Linear SVM")
                 classifiers.append(SVC(kernel="linear", C=0.025, probability=True))
-            if "RBF SVM" in settings["models"]:
+            if "RBF SVM" in settings.get("models", []):
                 names.append("RBF SVM")
                 classifiers.append(SVC(gamma=2, C=1, probability=True))
-            if "Decision Tree" in settings["models"]:
+            if "Decision Tree" in settings.get("models", []):
                 names.append("Decision Tree")
                 classifiers.append(DecisionTreeClassifier(max_depth=5))
-            if "Random Forest" in settings["models"]:
+            if "Random Forest" in settings.get("models", []):
                 names.append("Random Forest")
-                classifiers.append(RandomForestClassifier(max_depth=5, n_estimators=10, max_features=1))
-            if "Neural Net" in settings["models"]:
+                # classifiers.append(RandomForestClassifier(max_depth=5, n_estimators=10, max_features=1))  # [OLD]
+                classifiers.append(RandomForestClassifier(n_estimators=300, max_features='sqrt', min_samples_leaf=3, n_jobs=-1, random_state=42))  # [Abhi | 2025-08-13]
+            if "Neural Net" in settings.get("models", []):
                 names.append("Neural Net")
                 classifiers.append(MLPClassifier(alpha=1))
-            if "AdaBoost" in settings["models"]:
+            if "AdaBoost" in settings.get("models", []):
                 names.append("AdaBoost")
                 classifiers.append(AdaBoostClassifier())
-            if "Naive Bayes" in settings["models"]:
+            if "Naive Bayes" in settings.get("models", []):
                 names.append("Naive Bayes")
                 classifiers.append(GaussianNB())
-            if "QDA" in settings["models"]:
+            if "QDA" in settings.get("models", []):
                 names.append("QDA")
                 classifiers.append(QuadraticDiscriminantAnalysis())
         except:
@@ -417,13 +486,14 @@ class AI(object):
                 "Naive Bayes",
                 "QDA"]
             classifiers = [
-                KNeighborsClassifier(3),
+                # KNeighborsClassifier(3),  # [OLD]
+                KNeighborsClassifier(n_neighbors=5, weights='distance'),  # [Abhi | 2025-08-13]
                 SVC(kernel="linear", C=0.025, probability=True),
                 SVC(gamma=2, C=1, probability=True),
                 # GaussianProcessClassifier(1.0 * RBF(1.0), warm_start=True),
                 DecisionTreeClassifier(max_depth=5),
-                RandomForestClassifier(
-                    max_depth=5, n_estimators=10, max_features=1),
+                # RandomForestClassifier(max_depth=5, n_estimators=10, max_features=1),  # [OLD]
+                RandomForestClassifier(n_estimators=300, max_features='sqrt', min_samples_leaf=3, n_jobs=-1, random_state=42),  # [Abhi | 2025-08-13]
                 MLPClassifier(alpha=1),
                 AdaBoostClassifier(),
                 GaussianNB(),
@@ -444,26 +514,6 @@ class AI(object):
             except Exception as e:
                 self.logger.error("{} {}".format(name, str(e)))
 
-
-        # t2 = time.time()
-        # name = "Extended Naive Bayes"
-        # clf = ExtendedNaiveBayes(self.family, path_to_data=self.path_to_data)
-        # try:
-        #     clf.fit(fname)
-        #     self.logger.debug("learned {}, {:d} ms".format(
-        #         name, int(1000 * (t2 - time.time()))))
-        # except Exception as e:
-        #     self.logger.error(str(e))
-
-        # t2 = time.time()
-        # name = "Extended Naive Bayes2"
-        # clf = ExtendedNaiveBayes2(self.family, path_to_data=self.path_to_data)
-        # try:
-        #     clf.fit(fname)
-        #     self.logger.debug("learned {}, {:d} ms".format(
-        #         name, int(1000 * (t2 - time.time()))))
-        # except Exception as e:
-        #     self.logger.error(str(e))
         self.logger.debug("{:d} ms".format(int(1000 * (t - time.time()))))
 
     def save(self, save_file):
@@ -473,6 +523,11 @@ class AI(object):
         pickle.dump(self.naming, f)
         pickle.dump(self.algorithms, f)
         pickle.dump(self.family, f)
+        # [Abhi | 2025-08-13] persist global means for classify-time imputation
+        try:
+            pickle.dump(self.global_means, f)
+        except Exception:
+            pickle.dump(None, f)
         f.close()
         self.logger.debug("{:d} ms".format(int(1000 * (t - time.time()))))
 
@@ -483,6 +538,11 @@ class AI(object):
         self.naming = pickle.load(f)
         self.algorithms = pickle.load(f)
         self.family = pickle.load(f)
+        # [Abhi | 2025-08-13] load global means if present (backward compatible)
+        try:
+            self.global_means = pickle.load(f)
+        except Exception:
+            self.global_means = None
         f.close()
         self.logger.debug("{:d} ms".format(int(1000 * (t - time.time()))))
 
