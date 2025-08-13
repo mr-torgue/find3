@@ -146,6 +146,13 @@ class AI(object):
 
         # [Abhi | 2025-08-13] Hard missing gate: skip if too many missing
         num_absent = int(numpy.sum(x_vec <= ABSENT_RSSI))
+
+        # [Abhi | 2025-08-13 v2] Debug feature/missing info
+        self.logger.debug(
+            "Classify: features=%d, num_absent=%d (threshold=%.2f), saw_any=%s",
+            len(header), num_absent, threshold, str(not is_unknown)
+        )
+
         if num_absent > 3:
             payload = {'location_names': self.naming['to'], 'predictions': [], 'is_unknown': True}
             return payload
@@ -303,25 +310,57 @@ class AI(object):
             self.header = ['location']
 
             # check which columns to include and build a new header
+            # for i, column in enumerate(fullheader):
+            #     # try if whitelist if available
+            #     try:
+            #         if column in settings["whitelist"]:
+            #             columns.append(i)
+            #             self.header.append(column)
+            #             continue  # [Abhi | 2025-08-13] skip blacklist if whitelisted
+            #     except:
+            #         pass
+            #     # if not, try to use blacklist
+            #     try:
+            #         if "blacklist" in settings and column in settings["blacklist"]:
+            #             continue
+            #     except:
+            #         pass
+            #     # no white- or blacklist include it
+            #     columns.append(i)
+            #     self.header.append(column)
+
+            # [Abhi | 2025-08-13 v2] Fixed header duplication: never add the label col again
             for i, column in enumerate(fullheader):
-                # try if whitelist if available
+                if i == 0:
+                    continue  # never add 'location' as a feature
+                # whitelist first (if provided and non-empty)
                 try:
-                    if column in settings["whitelist"]:
-                        columns.append(i)
-                        self.header.append(column)
-                        continue  # [Abhi | 2025-08-13] skip blacklist if whitelisted
-                except:
+                    if "whitelist" in settings and settings["whitelist"]:
+                        if column in settings["whitelist"]:
+                            columns.append(i)
+                            self.header.append(column)
+                        # if whitelist active, skip non-listed columns
+                        continue
+                except Exception:
                     pass
-                # if not, try to use blacklist
+                # blacklist (optional)
                 try:
                     if "blacklist" in settings and column in settings["blacklist"]:
                         continue
-                except:
+                except Exception:
                     pass
-                # no white- or blacklist include it
+                # include by default
                 columns.append(i)
                 self.header.append(column)
+
             self.logger.debug("Using %d features for the AI: %s" % (len(self.header), self.header))
+
+            # [Abhi | 2025-08-13 v2] Safety fallback if no AP features selected
+            if len(self.header) <= 1:
+                self.logger.error("No AP features selected (whitelist/blacklist). Falling back to ALL non-location columns.")
+                self.header = ['location'] + [c for c in fullheader if c != 'location']
+                columns = [0] + [idx for idx, c in enumerate(fullheader) if c != 'location']
+                self.logger.debug("Fallback header: %s", self.header)
             
             count_all = 0
             count_skipped = 0
