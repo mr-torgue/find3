@@ -83,7 +83,10 @@ class AI(object):
         self.path_to_data = path_to_data
 
     def classify(self, sensor_data):
-
+        '' ABI || 3/09  Includes the following:
+            1. default value  (specified by self.default_value)
+            2. ignore data that see less than x percent of the access points (specified by self.threshold) '''
+        
          # try to load, set to default values otherwise
         try:
             default_value = self.default_value
@@ -104,10 +107,31 @@ class AI(object):
                         's'][sensorType][sensor]
         self.headerClassify = header
         self.csv_dataClassify = csv_data.reshape(1, -1)
-        payload = {'location_names': self.naming['to'], 'predictions': []}
+
+        ''' Abi, Apply missing value filter and mean imputation'''
+        x_vec = csv_data
+        num_defaults = numpy.count_nonzero(x_vec == default_value)
+        if num_defaults > 3:
+            self.logger.warning("Skipping classification: too many missing values (%d)" % num_defaults)
+            payload['is_unknown'] = True
+            return payload
+
+        # Replace default (-100) values with mean per AP
+        x_vec = numpy.where(x_vec == default_value, self.mean_per_ap, x_vec)
+        self.csv_dataClassify = x_vec.reshape(1, -1)
 
         threads = [None]*len(self.algorithms)
         self.results = [None]*len(self.algorithms)
+
+        ''' End of the filter''' 
+
+        ''' Test'''
+        # check if most values have been set (is it len(header) or len(header) - 1)
+        if(sum(d == default_value for d in csv_data) / len(header) < threshold):
+        ''' End of test'''
+
+            threads = [None]*len(self.algorithms)
+            self.results = [None]*len(self.algorithms)
 
         for i, alg in enumerate(self.algorithms.keys()):
             threads[i] = Thread(target=self.do_classification, args=(i, alg))
@@ -406,4 +430,5 @@ def do():
 # a = json.load(open('../testing/testdb_single_rec.json'))
 # classified = ai.classify(a)
 # print(json.dumps(classified,indent=2))
+
 
