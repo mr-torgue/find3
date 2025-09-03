@@ -108,28 +108,6 @@ class AI(object):
         self.headerClassify = header
         self.csv_dataClassify = csv_data.reshape(1, -1)
 
-        ''' Abi, Apply missing value filter and mean imputation'''
-        x_vec = csv_data
-        num_defaults = numpy.count_nonzero(x_vec == default_value)
-        if num_defaults > 3:
-            self.logger.warning("Skipping classification: too many missing values (%d)" % num_defaults)
-            payload['is_unknown'] = True
-            return payload
-
-        # Replace default (-100) values with mean per AP
-        x_vec = numpy.where(x_vec == default_value, self.mean_per_ap, x_vec)
-        self.csv_dataClassify = x_vec.reshape(1, -1)
-
-        threads = [None]*len(self.algorithms)
-        self.results = [None]*len(self.algorithms)
-
-        ''' End of the filter''' 
-
-        ''' Test'''
-        # check if most values have been set (is it len(header) or len(header) - 1)
-        if(sum(d == default_value for d in csv_data) / len(header) < threshold):
-        ''' End of test'''
-
             threads = [None]*len(self.algorithms)
             self.results = [None]*len(self.algorithms)
 
@@ -430,5 +408,6 @@ def do():
 # a = json.load(open('../testing/testdb_single_rec.json'))
 # classified = ai.classify(a)
 # print(json.dumps(classified,indent=2))
+
 
 
