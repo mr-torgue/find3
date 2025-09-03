@@ -13,7 +13,7 @@ import math
 from threading import Thread
 import functools
 import multiprocessing
-import os  # [Abhishek Kumar, 2025-09-03] Needed for config path handling
+import os  # [Abi, 2025-09-03] For config file path handling
 
 # create logger with 'spam_application'
 logger = logging.getLogger('learn')
@@ -78,27 +78,29 @@ class AI(object):
 
     def __init__(self, family=None, path_to_data=None, config=None):
         """
-        [Abhishek Kumar, 2025-09-03] Added optional config to enable:
+        [Abi, 2025-09-03] Added optional config enabling:
         - AP whitelist/blacklist filtering
-        - Max missing threshold
-        - Default RSSI for missing
-        - Mean imputation control
-        - Model filtering (limit which classifiers to train)
+        - Max missing threshold for row filtering
+        - Default RSSI value for missing features
+        - Mean imputation toggle (stores means for classify)
+        - Model filtering (select which classifiers train)
         """
         self.logger = logging.getLogger('learn.AI')
         self.naming = {'from': {}, 'to': {}}
         self.family = family
         self.path_to_data = path_to_data
 
-        # Load config from file if present, then overlay explicit dict
+        # [Abi, 2025-09-03] Config defaults (can be overridden by file or param)
         self.config = {
             "ap_whitelist": None,
             "ap_blacklist": None,
-            "max_missing": 3,          # [AK, 2025-09-03] Skip rows with >3 missing RSSIs
-            "default_rssi": -100.0,    # [AK, 2025-09-03] Default changed 0 -> -100 dBm
+            "max_missing": 3,          # Skip rows with >3 missing RSSIs
+            "default_rssi": -100.0,    # Default changed from 0 -> -100 dBm
             "use_mean_imputation": True,
-            "models_enabled": None     # e.g., ["Nearest Neighbors","Random Forest"]
+            "models_enabled": None
         }
+
+        # [Abi, 2025-09-03] Load config.json if present
         file_cfg = {}
         if self.path_to_data:
             cfg_path = os.path.join(self.path_to_data, "config.json")
@@ -113,35 +115,35 @@ class AI(object):
         if config:
             self.config.update({k: v for k, v in config.items() if v is not None})
 
-        # Normalize lists
+        # Normalize lists to sets for fast checks
         if self.config["ap_whitelist"] is not None:
             self.config["ap_whitelist"] = set(self.config["ap_whitelist"])
         if self.config["ap_blacklist"] is not None:
             self.config["ap_blacklist"] = set(self.config["ap_blacklist"])
 
-        self.mean_per_ap = None  # [AK, 2025-09-03] Computed during learn() and reused in classify
+        self.mean_per_ap = None  # [Abi, 2025-09-03] Computed in learn(), reused in classify()
 
     def classify(self, sensor_data):
         header = self.header[1:]
         is_unknown = True
 
-        # [Abhishek Kumar, 2025-09-03] Initialize feature vector with imputation baseline:
-        # use per-AP mean if enabled/available, otherwise default_rssi
+        # [Abi, 2025-09-03] Start from imputation baseline
         if self.config["use_mean_imputation"] and isinstance(self.mean_per_ap, numpy.ndarray):
             csv_data = self.mean_per_ap.copy()
         else:
             csv_data = numpy.full(len(header), self.config["default_rssi"], dtype=float)
 
         # Apply incoming readings
+        seen = 0  # [Abi, 2025-09-03] Track how many features were actually provided
         for sensorType in sensor_data.get('s', {}):
             for sensor in sensor_data['s'][sensorType]:
                 sensorName = sensorType + "-" + sensor
                 if sensorName in header:
                     is_unknown = False
                     val = sensor_data['s'][sensorType][sensor]
-                    # Ensure float
                     try:
                         csv_data[header.index(sensorName)] = float(val)
+                        seen += 1
                     except Exception:
                         self.logger.debug("Non-float sensor value {} for {}".format(val, sensorName))
 
@@ -163,6 +165,18 @@ class AI(object):
             if result != None:
                 payload['predictions'].append(result)
         payload['is_unknown'] = is_unknown
+
+        # [Abi, 2025-09-03] Small result summary to INFO log
+        # Build a compact top-1 view per model
+        top1 = []
+        for r in payload['predictions']:
+            if r['locations'] and r['probabilities']:
+                top1.append((r['name'], r['locations'][0], r['probabilities'][0]))
+        self.logger.info(
+            "CLASSIFY_SUMMARY seen=%d, models=%d, unknown=%s, top1=%s",
+            seen, len(top1), is_unknown, top1
+        )
+
         return payload
 
     def do_classification(self, index, name):
@@ -188,8 +202,7 @@ class AI(object):
         badValue = False
         for tup in sorted(predict.items(), key=operator.itemgetter(1), reverse=True):
             predict_payload['locations'].append(str(tup[0]))
-            predict_payload['probabilities'].append(
-                round(float(tup[1]), 2))
+            predict_payload['probabilities'].append(round(float(tup[1]), 2))
             if math.isnan(tup[1]):
                 badValue = True
                 break
@@ -204,7 +217,7 @@ class AI(object):
 
     def _filter_header_by_ap(self, orig_header):
         """
-        [Abhishek Kumar, 2025-09-03] AP whitelist/blacklist filtering applied to header.
+        [Abi, 2025-09-03] Apply AP whitelist/blacklist to feature header.
         """
         ap_whitelist = self.config["ap_whitelist"]
         ap_blacklist = self.config["ap_blacklist"]
@@ -222,19 +235,18 @@ class AI(object):
         return filtered
 
     def learn(self, fname):
-        t = time.time()
+        t0 = time.time()
         # load CSV file
         self.header = []
         raw_rows = []
         naming_num = 0
 
-        # [Abhishek Kumar, 2025-09-03] We will:
-        # 1) Read header and filter AP columns via whitelist/blacklist.
-        # 2) Read rows keeping only filtered columns, record Nones for missing.
-        # 3) Compute per-AP mean across observed values.
-        # 4) Drop rows with too many missing features.
-        # 5) Impute remaining missings with per-AP mean or default_rssi.
-
+        # [Abi, 2025-09-03] Steps:
+        # 1) Read header; filter APs via whitelist/blacklist.
+        # 2) Parse rows; keep only filtered columns; mark missing as None.
+        # 3) Compute per-AP mean (exclude None).
+        # 4) Drop rows with too many missing features (> max_missing).
+        # 5) Impute remaining missings (mean or default_rssi).
         with open(fname, 'r') as csvfile:
             reader = csv.reader(csvfile, delimiter=',')
             for i, row in enumerate(reader):
@@ -242,17 +254,14 @@ class AI(object):
                 if i == 0:
                     original_header = row  # includes class label at index 0
                     feature_header = original_header[1:]
-                    # Apply AP filter
                     filtered_features = self._filter_header_by_ap(feature_header)
-                    # Map from original index -> filtered position
                     keep_indices = [1 + feature_header.index(h) for h in filtered_features]
                     self.header = [original_header[0]] + filtered_features
                     keep_index_set = set(keep_indices)
-                    # [AK, 2025-09-03] Keep mapping for later
-                    self._keep_indices = keep_indices
+                    self._keep_indices = keep_indices  # might be useful later
                 else:
                     new_row = [None] * (1 + len(self.header[1:]))
-                    # class/label handling
+                    # class/label
                     val = row[0]
                     if val not in self.naming['from']:
                         self.naming['from'][val] = naming_num
@@ -267,7 +276,6 @@ class AI(object):
                             continue
                         v = row[j]
                         if v == '' or v is None:
-                            # [Abhishek Kumar, 2025-09-03] Mark missing as None now; impute later
                             new_row[dst_j] = None
                         else:
                             try:
@@ -297,18 +305,18 @@ class AI(object):
             else:
                 mean_per_ap[k] = default_rssi  # fallback if an AP never observed
 
-        self.mean_per_ap = mean_per_ap  # [AK, 2025-09-03] Persist for classify()
+        self.mean_per_ap = mean_per_ap  # [Abi, 2025-09-03] Persist for classify()
 
         # Build x, y with row filtering and imputation
         max_missing = int(self.config["max_missing"])
         filtered_rows = []
+        dropped_rows = 0  # [Abi, 2025-09-03] For summary
         for r in raw_rows:
             feats = r[1:]
             missing_count = sum(1 for v in feats if v is None)
             if missing_count > max_missing:
-                # [Abhishek Kumar, 2025-09-03] Skip rows with too many missing values
+                dropped_rows += 1
                 continue
-            # Impute
             imputed = []
             for k, v in enumerate(feats):
                 if v is None:
@@ -352,14 +360,13 @@ class AI(object):
             SVC(gamma=2, C=1, probability=True),
             # GaussianProcessClassifier(1.0 * RBF(1.0), warm_start=True),
             DecisionTreeClassifier(max_depth=5),
-            RandomForestClassifier(
-                max_depth=5, n_estimators=10, max_features=1),
+            RandomForestClassifier(max_depth=5, n_estimators=10, max_features=1),
             MLPClassifier(alpha=1),
             AdaBoostClassifier(),
             GaussianNB(),
             QuadraticDiscriminantAnalysis()]
 
-        # [Abhishek Kumar, 2025-09-03] Optional model filtering via config
+        # [Abi, 2025-09-03] Optional model filtering via config
         models_enabled = self.config["models_enabled"]
         if models_enabled is not None:
             mask = [n in models_enabled for n in names]
@@ -367,6 +374,7 @@ class AI(object):
             classifiers = [c for c, m in zip(classifiers, mask) if m]
 
         self.algorithms = {}
+        trained = []  # [Abi, 2025-09-03] For summary
         for name, clf in zip(names, classifiers):
             t2 = time.time()
             self.logger.debug("learning {}".format(name))
@@ -374,13 +382,22 @@ class AI(object):
                 self.algorithms[name] = self.train(clf, x, y)
                 self.logger.debug("learned {}, {:d} ms".format(
                     name, int(1000 * (t2 - time.time()))))
+                trained.append(name)
             except Exception as e:
                 self.logger.error("{} {}".format(name, str(e)))
 
-        self.logger.debug("{:d} ms".format(int(1000 * (t - time.time()))))
+        elapsed_ms = int(1000 * (time.time() - t0))
+        self.logger.debug("{:d} ms".format(elapsed_ms))
 
-        # [Legacy commented blocks preserved to avoid altering core functionality]
-        # Extended Naive Bayes variants remain available if needed.
+        # [Abi, 2025-09-03] Small result summary to INFO log
+        self.logger.info(
+            "LEARN_SUMMARY rows_total=%d, rows_used=%d, rows_dropped=%d, features=%d, models_trained=%d, models=%s, max_missing=%d, default_rssi=%.1f, mean_impute=%s, elapsed_ms=%d",
+            len(raw_rows), len(filtered_rows), dropped_rows, num_features,
+            len(trained), trained, max_missing, default_rssi, self.config['use_mean_imputation'],
+            elapsed_ms
+        )
+
+        # [Abi, 2025-09-03] Legacy commented blocks retained intentionally.
 
     def save(self, save_file):
         t = time.time()
@@ -390,14 +407,20 @@ class AI(object):
         pickle.dump(self.naming, f)
         pickle.dump(self.algorithms, f)
         pickle.dump(self.family, f)
-        # [Abhishek Kumar, 2025-09-03] NEW: persist imputation means and config
+        # [Abi, 2025-09-03] Persist imputation means and config
         try:
             pickle.dump(self.mean_per_ap, f)
             pickle.dump(self.config, f)
         except Exception as e:
             self.logger.error("Optional extras not saved: {}".format(e))
         f.close()
-        self.logger.debug("{:d} ms".format(int(1000 * (t - time.time()))))
+        elapsed_ms = int(1000 * (time.time() - t))
+        self.logger.debug("{:d} ms".format(elapsed_ms))
+        # [Abi, 2025-09-03] Small result summary
+        self.logger.info("SAVE_SUMMARY file=%s, features=%d, models=%d, elapsed_ms=%d",
+                         save_file, len(self.header) - 1 if self.header else -1,
+                         len(self.algorithms) if hasattr(self, 'algorithms') else -1,
+                         elapsed_ms)
 
     def load(self, save_file):
         t = time.time()
@@ -406,26 +429,29 @@ class AI(object):
         self.naming = pickle.load(f)
         self.algorithms = pickle.load(f)
         self.family = pickle.load(f)
-        # [Abhishek Kumar, 2025-09-03] Try to load new fields if present
+        # [Abi, 2025-09-03] Try to load new fields if present
         try:
             self.mean_per_ap = pickle.load(f)
             self.config = pickle.load(f)
-            # Normalize sets if loaded from pickle
             if self.config.get("ap_whitelist") is not None and not isinstance(self.config["ap_whitelist"], set):
                 self.config["ap_whitelist"] = set(self.config["ap_whitelist"])
             if self.config.get("ap_blacklist") is not None and not isinstance(self.config["ap_blacklist"], set):
                 self.config["ap_blacklist"] = set(self.config["ap_blacklist"])
         except Exception:
-            # Backward compatibility with older model files
             if not hasattr(self, "mean_per_ap"):
                 self.mean_per_ap = None
         f.close()
-        self.logger.debug("{:d} ms".format(int(1000 * (t - time.time()))))
+        elapsed_ms = int(1000 * (time.time() - t))
+        self.logger.debug("{:d} ms".format(elapsed_ms))
+        # [Abi, 2025-09-03] Small result summary
+        self.logger.info("LOAD_SUMMARY file=%s, features=%d, models=%d, elapsed_ms=%d",
+                         save_file, len(self.header) - 1 if self.header else -1,
+                         len(self.algorithms) if hasattr(self, 'algorithms') else -1,
+                         elapsed_ms)
 
 
 def do():
-    # NOTE: This demo function is unchanged; it references attributes (ai.x, ai.y)
-    # only present in that example context. Left intact to preserve original file.
+    # NOTE: This demo function is unchanged to preserve original structure.
     ai = AI()
     ai.load()
     # ai.learn()
