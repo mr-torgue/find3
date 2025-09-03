@@ -13,6 +13,7 @@ import math
 from threading import Thread
 import functools
 import multiprocessing
+import os
 
 # create logger with 'spam_application'
 logger = logging.getLogger('learn')
@@ -82,6 +83,15 @@ class AI(object):
         self.path_to_data = path_to_data
 
     def classify(self, sensor_data):
+
+         # try to load, set to default values otherwise
+        try:
+            default_value = self.default_value
+            threshold = self.threshold
+        except:
+            default_value = 0
+            threshold = 0.6
+            
         header = self.header[1:]
         is_unknown = True
         csv_data = numpy.zeros(len(header))
@@ -396,3 +406,4 @@ def do():
 # a = json.load(open('../testing/testdb_single_rec.json'))
 # classified = ai.classify(a)
 # print(json.dumps(classified,indent=2))
+
