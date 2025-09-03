@@ -82,6 +82,21 @@ class AI(object):
         self.path_to_data = path_to_data
 
     def classify(self, sensor_data):
+        
+     ''' changes Folmer 14-05-2025
+    Includes the following:
+    1. default value  (specified by self.default_value)
+    2. ignore data that see less than x percent of the access points (specified by self.threshold)
+    '''
+         # try to load, set to default values otherwise
+        try:
+            default_value = self.default_value
+            threshold = self.threshold
+        except:
+            default_value = 0
+            threshold = 0.6
+        
+        
         header = self.header[1:]
         is_unknown = True
         csv_data = numpy.zeros(len(header))
@@ -188,31 +203,93 @@ class AI(object):
         self.header = []
         rows = []
         naming_num = 0
+
+        
         with open(fname, 'r') as csvfile:
             reader = csv.reader(csvfile, delimiter=',')
+
+                def learn(self, fname):
+        t = time.time()
+        # load CSV file
+        rows = []
+        naming_num = 0
+
+        with open(fname, 'r') as csvfile:
+            # if file does not exist, simply ignore it
+            jsonfname = 'settings.json'
+            try:
+                settings = json.load(open(jsonfname))
+            except Exception as e:
+                self.logger.error("Could not load json settings file: %s\nCurrent working directory: %s" % (e, os.getcwd()))
+                pass
+
+            # set default value
+            try:
+                self.default_value = float(settings["default"])
+            except:
+                self.default_value = 0
+            # set threshold
+            try:
+                self.threshold = float(settings["threshold"])
+            except:
+                self.threshold = 0.6
+
+            # always include the location
+            reader = csv.reader(csvfile, delimiter=',')
+            fullheader = next(reader)
+            columns = [0]
+            self.header = ['location']
+
+            # check which columns to include and build a new header
+            for i, column in enumerate(fullheader):
+                # try if whitelist if available
+                try:
+                    if column in settings["whitelist"]:
+                        columns.append(i)
+                        self.header.append(column)
+                except:
+                    # if not, try to use blacklist
+                    try:
+                        if column not in settings["blacklist"]:
+                            columns.append(i)
+                            self.header.append(column)
+                    except:
+                        # no white- or blacklist, just use it
+                        columns.append(i)
+                        self.header.append(column)
+            self.logger.debug("Using %d features for the AI: %s" % (len(self.header), self.header))
+            
+            count_all = 0
+            count_skipped = 0
             for i, row in enumerate(reader):
-                self.logger.debug(row)
-                if i == 0:
-                    self.header = row
+                count_all += 1
+                new_row = []
+                for j in columns:
+                    val = row[j]
+                    if j == 0:
+                        # this is a name of the location
+                        if val not in self.naming['from']:
+                            self.naming['from'][val] = naming_num
+                            self.naming['to'][naming_num] = val
+                            naming_num += 1
+                        new_row.append(self.naming['from'][val])
+                        continue
+                    if val == '':
+                        new_row.append(self.default_value)
+                        continue
+                    try:
+                        new_row.append(float(val))
+                    except:
+                        self.logger.error(
+                            "problem parsing value " + str(val))
+                if(len(new_row) != len(self.header)):
+                    self.logger.error("Row size(%d) should be the same as header size(%d)" % (len(new_row), len(self.header)))
+                if(sum(d == self.default_value for d in new_row) / (len(self.header) - 1) < self.threshold):
+                    rows.append(new_row)
                 else:
-                    for j, val in enumerate(row):
-                        if j == 0:
-                            # this is a name of the location
-                            if val not in self.naming['from']:
-                                self.naming['from'][val] = naming_num
-                                self.naming['to'][naming_num] = val
-                                naming_num += 1
-                            row[j] = self.naming['from'][val]
-                            continue
-                        if val == '':
-                            row[j] = 0
-                            continue
-                        try:
-                            row[j] = float(val)
-                        except:
-                            self.logger.error(
-                                "problem parsing value " + str(val))
-                    rows.append(row)
+                    count_skipped += 1
+                #self.logger.debug("row %d: %s" % (i, new_row))
+        self.logger.debug("Total rows: %d, skipped %d" % (count_all, count_skipped))
 
         # first column in row is the classification, Y
         y = numpy.zeros(len(rows))
@@ -225,30 +302,84 @@ class AI(object):
             y[i] = rows[i][0]
             x[i, :] = numpy.array(rows[i][1:])
 
-        names = [
-            "Nearest Neighbors",
-            "Linear SVM",
-            "RBF SVM",
-            # "Gaussian Process",
-            "Decision Tree",
-            "Random Forest",
-            "Neural Net",
-            "AdaBoost",
-            "Naive Bayes",
-            "QDA"]
-        classifiers = [
-            KNeighborsClassifier(3),
-            SVC(kernel="linear", C=0.025, probability=True),
-            SVC(gamma=2, C=1, probability=True),
-            # GaussianProcessClassifier(1.0 * RBF(1.0), warm_start=True),
-            DecisionTreeClassifier(max_depth=5),
-            RandomForestClassifier(
-                max_depth=5, n_estimators=10, max_features=1),
-            MLPClassifier(alpha=1),
-            AdaBoostClassifier(),
-            GaussianNB(),
-            QuadraticDiscriminantAnalysis()]
+        try:
+            if settings["mode"] == "mean":
+                x = numpy.where(x == self.default_value, numpy.nan, x)
+                
+                rooms = numpy.unique(y)
+                for room in rooms:
+                    mask = y == room
+                    x_room = x[mask]
+                    if numpy.isnan(x_room).all():   
+                        x[mask] = self.default_value
+                    else:
+                        room_means = numpy.nanmean(x_room, axis=0)
+                        x[mask] = numpy.where(numpy.isnan(x_room), room_means, x_room)
+                        self.logger.debug("Mean per column: %s for room %d" % (room_means, room))
+
+        except Exception as e:
+            print("An exception occurred: %s" % (e))
+        self.logger.debug("x: %s\ncontains nan: %s" % (x, numpy.isnan(x).any()))
+        
+        names = []
+        classifiers = []
+
+        try:
+            if "Nearest Neighbors" in settings["models"]:
+                names.append("Nearest Neighbors")
+                classifiers.append(KNeighborsClassifier(3))
+            if "Linear SVM" in settings["models"]:
+                names.append("Linear SVM")
+                classifiers.append(SVC(kernel="linear", C=0.025, probability=True))
+            if "RBF SVM" in settings["models"]:
+                names.append("RBF SVM")
+                classifiers.append(SVC(gamma=2, C=1, probability=True))
+            if "Decision Tree" in settings["models"]:
+                names.append("Decision Tree")
+                classifiers.append(DecisionTreeClassifier(max_depth=5))
+            if "Random Forest" in settings["models"]:
+                names.append("Random Forest")
+                classifiers.append(RandomForestClassifier(max_depth=5, n_estimators=10, max_features=1))
+            if "Neural Net" in settings["models"]:
+                names.append("Neural Net")
+                classifiers.append(MLPClassifier(alpha=1))
+            if "AdaBoost" in settings["models"]:
+                names.append("AdaBoost")
+                classifiers.append(AdaBoostClassifier())
+            if "Naive Bayes" in settings["models"]:
+                names.append("Naive Bayes")
+                classifiers.append(GaussianNB())
+            if "QDA" in settings["models"]:
+                names.append("QDA")
+                classifiers.append(QuadraticDiscriminantAnalysis())
+        except:
+            names = [
+                "Nearest Neighbors",
+                "Linear SVM",
+                "RBF SVM",
+                # "Gaussian Process",
+                "Decision Tree",
+                "Random Forest",
+                "Neural Net",
+                "AdaBoost",
+                "Naive Bayes",
+                "QDA"]
+            classifiers = [
+                KNeighborsClassifier(3),
+                SVC(kernel="linear", C=0.025, probability=True),
+                SVC(gamma=2, C=1, probability=True),
+                # GaussianProcessClassifier(1.0 * RBF(1.0), warm_start=True),
+                DecisionTreeClassifier(max_depth=5),
+                RandomForestClassifier(
+                    max_depth=5, n_estimators=10, max_features=1),
+                MLPClassifier(alpha=1),
+                AdaBoostClassifier(),
+                GaussianNB(),
+                QuadraticDiscriminantAnalysis()]
+
+        self.logger.debug("Using %d models: %s" % (len(names), names))
         self.algorithms = {}
+
         # split_for_learning = int(0.70 * len(y))
         for name, clf in zip(names, classifiers):
             t2 = time.time()
@@ -396,3 +527,4 @@ def do():
 # a = json.load(open('../testing/testdb_single_rec.json'))
 # classified = ai.classify(a)
 # print(json.dumps(classified,indent=2))
+
