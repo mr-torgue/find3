@@ -13,7 +13,6 @@ import math
 from threading import Thread
 import functools
 import multiprocessing
-import os
 
 # create logger with 'spam_application'
 logger = logging.getLogger('learn')
@@ -87,13 +86,13 @@ class AI(object):
             1. default value  (specified by self.default_value)
             2. ignore data that see less than x percent of the access points (specified by self.threshold) '''
         
-         # try to load, set to default values otherwise
+       '''  # try to load, set to default values otherwise
         try:
             default_value = self.default_value
             threshold = self.threshold
         except:
             default_value = 0
-            threshold = 0.6
+            threshold = 0.6'''
             
         header = self.header[1:]
         is_unknown = True
@@ -408,6 +407,7 @@ def do():
 # a = json.load(open('../testing/testdb_single_rec.json'))
 # classified = ai.classify(a)
 # print(json.dumps(classified,indent=2))
+
 
 
 
