@@ -23,6 +23,8 @@ import os  # [Abi, 2025-09-03] For config file path handling
 import sys, platform
 import sklearn
 
+print("09 SEPT)
+
 # create logger with 'spam_application'
 logger = logging.getLogger('learn')
 logger.setLevel(logging.DEBUG)
@@ -1412,6 +1414,7 @@ def do():
                     k, g, len(set(known_groups[k]).intersection(guessed_groups[g])))
 
 '''''
+
 
 
 
