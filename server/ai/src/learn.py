@@ -18,8 +18,6 @@ import os  # [Abi, 2025-09-03] For config file path handling
 import sys, platform
 import sklearn
 
-print("13th Sept: 2:43 PM")
-
 # create logger with 'spam_application'
 logger = logging.getLogger('learn')
 logger.setLevel(logging.DEBUG)
@@ -99,7 +97,7 @@ class AI(object):
         self.config = {
             "ap_whitelist": None,
             "ap_blacklist": None,
-            "max_missing": 3,          # Skip rows with >3 missing RSSIs (supports ratio too)
+            "max_missing": 3,          # Skip rows with >3 missing RSSIs
             "default_rssi": -100.0,    # (4) Default changed from 0 -> -100 dBm
             "use_mean_imputation": True,  # (5)
             "models_enabled": None      # (3)
@@ -209,21 +207,6 @@ class AI(object):
         except Exception:
             self.logger.info("PROCESS_FINISHED %s", str(info))
 
-    # ---------- New helper: support ratio/int for max_missing ----------
-    def _max_missing_threshold(self, num_features):
-        """
-        [Abi, 2025-09-09] Allow integer or ratio for max_missing.
-        - int  : interpreted literally
-        - 0<f<1: fraction of features (floored)
-        """
-        mm = self.config.get("max_missing", 3)
-        try:
-            if isinstance(mm, float) and 0 < mm < 1:
-                return int(math.floor(mm * num_features))
-            return int(mm)
-        except Exception:
-            return 3
-
     def classify(self, sensor_data):
         header = self.header[1:]
         is_unknown = True
@@ -253,13 +236,11 @@ class AI(object):
                     except Exception:
                         self.logger.debug("Non-float sensor value {} for {}".format(val, sensorName))
 
-        # Missing metrics
-        missing_seen_gap = max(0, len(header) - seen)
-        default_val = float(self.config["default_rssi"])
-        missing_default_slots = int((csv_data == default_val).sum())
-        if missing_seen_gap > self._max_missing_threshold(len(header)):
-            self.logger.warning("[CLEAN] inference missing_seen_gap=%d (> %d); proceeding with imputed/defaults",
-                                missing_seen_gap, self._max_missing_threshold(len(header)))
+        # [Abi, 2025-09-09] Soft-check: missing count relative to feature set (log only)
+        missing = max(0, len(header) - seen)
+        if missing > int(self.config["max_missing"]):
+            self.logger.warning("[CLEAN] inference missing=%d (> %d); proceeding with imputed/defaults",
+                                missing, self.config["max_missing"])
 
         self.headerClassify = header
         self.csv_dataClassify = csv_data.reshape(1, -1)
@@ -286,8 +267,8 @@ class AI(object):
             if r['locations'] and r['probabilities']:
                 top1.append((r['name'], r['locations'][0], r['probabilities'][0]))
         self.logger.info(
-            "CLASSIFY_SUMMARY seen=%d, missing_seen_gap=%d, missing_default_slots=%d, models=%d, unknown=%s, top1=%s",
-            seen, missing_seen_gap, missing_default_slots, len(top1), is_unknown, top1
+            "CLASSIFY_SUMMARY seen=%d, missing=%d, models=%d, unknown=%s, top1=%s",
+            seen, missing, len(top1), is_unknown, top1
         )
 
         # [Abi, 2025-09-09] Final banner for classify()
@@ -295,8 +276,7 @@ class AI(object):
             stage="classify",
             extra={
                 "seen": seen,
-                "missing_seen_gap": missing_seen_gap,
-                "missing_default_slots": missing_default_slots,
+                "missing": missing,
                 "unknown": is_unknown,
                 "top1_preview": self._clip_list(top1, 5),
             }
@@ -344,35 +324,20 @@ class AI(object):
 
     def _filter_header_by_ap(self, orig_header):
         """
-        [Abi, 2025-09-09] Apply AP whitelist/blacklist to feature header.
-        Accepts entries with or without the 'wifi-' prefix (bare MACs ok).
+        [Abi, 2025-09-03] Apply AP whitelist/blacklist to feature header.
         """
         ap_whitelist = self.config["ap_whitelist"]
         ap_blacklist = self.config["ap_blacklist"]
 
-        # Build normalized MAC-only sets for comparison
-        def mac_only_set(s):
-            if not s:
-                return None
-            out = set()
-            for item in s:
-                it = item.lower()
-                out.add(it[5:] if it.startswith("wifi-") else it)
-            return out
-
-        wl_macs = mac_only_set(ap_whitelist)
-        bl_macs = mac_only_set(ap_blacklist)
-
-        if wl_macs is None and bl_macs is None:
+        if ap_whitelist is None and ap_blacklist is None:
             return orig_header
 
         filtered = []
         for ap in orig_header:
             ap_l = ap.lower()
-            mac = ap_l[5:] if ap_l.startswith("wifi-") else ap_l
-            if wl_macs is not None and mac not in wl_macs:
+            if ap_whitelist is not None and ap_l not in ap_whitelist:
                 continue
-            if bl_macs is not None and mac in bl_macs:
+            if ap_blacklist is not None and ap_l in ap_blacklist:
                 continue
             filtered.append(ap)
         return filtered
@@ -398,15 +363,6 @@ class AI(object):
                     original_header = row  # includes class label at index 0
                     feature_header = original_header[1:]
                     filtered_features = self._filter_header_by_ap(feature_header)
-
-                    # [Abi, 2025-09-09] Log AP filter effect
-                    self.logger.info(
-                        "[AP] features_before=%d features_after=%d wl=%d bl=%d",
-                        len(feature_header), len(filtered_features),
-                        len(self.config["ap_whitelist"]) if self.config.get("ap_whitelist") else 0,
-                        len(self.config["ap_blacklist"]) if self.config.get("ap_blacklist") else 0
-                    )
-
                     keep_indices = [1 + feature_header.index(h) for h in filtered_features]
                     self.header = [original_header[0]] + filtered_features
                     keep_index_set = set(keep_indices)
@@ -439,19 +395,6 @@ class AI(object):
 
                     raw_rows.append(new_row)
 
-        # [Abi, 2025-09-09] Missing-count distribution across raw rows
-        if raw_rows:
-            tentative_features = len(self.header) - 1
-            mc = numpy.array([sum(1 for v in r[1:] if v is None) for r in raw_rows], dtype=int)
-            p50 = int(numpy.percentile(mc, 50))
-            p75 = int(numpy.percentile(mc, 75))
-            p90 = int(numpy.percentile(mc, 90))
-            p95 = int(numpy.percentile(mc, 95))
-            self.logger.info(
-                "[CLEAN] missing_per_row: min=%d p50=%d p75=%d p90=%d p95=%d max=%d (features=%d, rows=%d)",
-                int(mc.min()), p50, p75, p90, p95, int(mc.max()), tentative_features, len(raw_rows)
-            )
-
         # Compute per-AP mean (excluding None)
         num_features = len(self.header) - 1
         sums = numpy.zeros(num_features, dtype=float)
@@ -473,14 +416,13 @@ class AI(object):
         self.mean_per_ap = mean_per_ap  # [Abi, 2025-09-03] Persist for classify()
 
         # Build x, y with row filtering and imputation
-        max_missing_eff = self._max_missing_threshold(num_features)
-
+        max_missing = int(self.config["max_missing"])
         filtered_rows = []
         dropped_rows = 0  # [Abi, 2025-09-03] For summary
         for r in raw_rows:
             feats = r[1:]
             missing_count = sum(1 for v in feats if v is None)
-            if missing_count > max_missing_eff:
+            if missing_count > max_missing:
                 dropped_rows += 1
                 continue
             imputed = []
@@ -493,39 +435,6 @@ class AI(object):
                 else:
                     imputed.append(v)
             filtered_rows.append([r[0]] + imputed)
-
-        # Auto-relax if you’d otherwise train on nothing
-        if not filtered_rows:
-            self.logger.warning(
-                "[CLEAN] 0 rows after filtering (features=%d, max_missing=%s, wl=%d, bl=%d). "
-                "Relaxing filter: will keep ALL rows and only impute.",
-                num_features,
-                str(self.config.get('max_missing')),
-                len(self.config['ap_whitelist']) if self.config.get('ap_whitelist') else 0,
-                len(self.config['ap_blacklist']) if self.config.get('ap_blacklist') else 0,
-            )
-            for r in raw_rows:
-                feats = r[1:]
-                imputed = []
-                for k, v in enumerate(feats):
-                    if v is None:
-                        if self.config["use_mean_imputation"]:
-                            imputed.append(mean_per_ap[k])
-                        else:
-                            imputed.append(default_rssi)
-                    else:
-                        imputed.append(v)
-                filtered_rows.append([r[0]] + imputed)
-            dropped_rows = 0  # since we kept all
-
-        # Sanity: how many classes remain?
-        classes_used = {int(r[0]) for r in filtered_rows}
-        if len(classes_used) < 2:
-            self.logger.warning(
-                "[CLEAN] Only %d class present after filtering/imputation. "
-                "Training may be unstable. Consider relaxing filters.",
-                len(classes_used)
-            )
 
         if not filtered_rows:
             raise RuntimeError("After filtering, no rows remain to train on. "
@@ -584,6 +493,7 @@ class AI(object):
             self.logger.debug("learning {}".format(name))
             try:
                 self.algorithms[name] = self.train(clf, x, y)
+                # [Abi, 2025-09-09] Fix negative ms reporting
                 self.logger.debug("learned %s, %d ms", name, int(1000 * (time.time() - t2)))
                 trained.append(name)
             except Exception as e:
@@ -594,12 +504,10 @@ class AI(object):
 
         # [Abi, 2025-09-03] Small result summary to INFO log
         self.logger.info(
-            "LEARN_SUMMARY rows_total=%d, rows_used=%d, rows_dropped=%d, features=%d, "
-            "models_trained=%d, models=%s, max_missing_eff=%d, default_rssi=%.1f, "
-            "mean_impute=%s, elapsed_ms=%d",
+            "LEARN_SUMMARY rows_total=%d, rows_used=%d, rows_dropped=%d, features=%d, models_trained=%d, models=%s, max_missing=%d, default_rssi=%.1f, mean_impute=%s, elapsed_ms=%d",
             len(raw_rows), len(filtered_rows), dropped_rows, num_features,
-            len(trained), trained, max_missing_eff, default_rssi,
-            self.config['use_mean_imputation'], elapsed_ms
+            len(trained), trained, max_missing, default_rssi, self.config['use_mean_imputation'],
+            elapsed_ms
         )
 
         # [Abi, 2025-09-09] Final banner for learn()
@@ -774,186 +682,6 @@ def do():
             for g in guessed_groups:
                 print(
                     k, g, len(set(known_groups[k]).intersection(guessed_groups[g])))
-
-# ====================== APPEND BELOW THIS LINE ======================
-# [Abi, 2025-09-09] Holdout evaluation + simple CLI for train/eval/classify/info
-
-import argparse
-from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
-
-def evaluate_holdout(ai, fname):
-    """
-    Evaluate an already-trained/loaded AI model on a holdout CSV.
-    Uses the model's own header (ai.header) and mean_per_ap for imputation (no leakage).
-    Ensemble = average of predict_proba across all trained models.
-    """
-    if not getattr(ai, "algorithms", None) or not ai.algorithms:
-        raise RuntimeError("Model is not loaded/trained. Call ai.learn(...) or ai.load(...).")
-    if not getattr(ai, "header", None):
-        raise RuntimeError("Model header missing. Train or load a model first.")
-    if ai.mean_per_ap is None:
-        ai.logger.warning("mean_per_ap is None; falling back to default_rssi for all missing features.")
-
-    feat_names = ai.header[1:]
-    feat_to_idx = {h: i for i, h in enumerate(feat_names)}
-    n_features = len(feat_names)
-
-    y_true, y_pred = [], []
-    total_rows = 0
-    used_rows = 0
-    skipped_rows = 0
-
-    with open(fname, 'r') as f:
-        reader = csv.reader(f)
-        test_header = next(reader)
-        test_cols = {name: i for i, name in enumerate(test_header)}
-
-        # Build a list of feature columns we can map from test -> model
-        available = [c for c in feat_names if c in test_cols]
-
-        for row in reader:
-            total_rows += 1
-            # Label in column 0 (string)
-            label_str = row[0]
-            if label_str not in ai.naming['from']:
-                ai.logger.warning("[EVAL] Unknown class '%s' not present in training; row skipped.", label_str)
-                skipped_rows += 1
-                continue
-            y_true_id = ai.naming['from'][label_str]
-
-            # Build vector aligned to model features
-            vec = numpy.empty(n_features, dtype=float)
-            vec[:] = float(ai.config["default_rssi"])
-            # Set present features
-            for feat in available:
-                try:
-                    raw = row[test_cols[feat]]
-                    vec[feat_to_idx[feat]] = float(raw) if raw != "" else vec[feat_to_idx[feat]]
-                except Exception:
-                    # keep default/imputed
-                    pass
-
-            # Impute from training means where needed
-            if ai.config.get("use_mean_imputation") and isinstance(ai.mean_per_ap, numpy.ndarray):
-                default_val = float(ai.config["default_rssi"])
-                need_impute = (vec == default_val)
-                vec[need_impute] = ai.mean_per_ap[need_impute]
-
-            # Aggregate probabilities across models
-            proba_sum = None
-            n_models = 0
-            for name, clf in ai.algorithms.items():
-                try:
-                    p = clf.predict_proba(vec.reshape(1, -1))[0]
-                    proba_sum = p if proba_sum is None else (proba_sum + p)
-                    n_models += 1
-                except Exception as e:
-                    ai.logger.error("[EVAL] %s.predict_proba failed: %s", name, e)
-
-            if n_models == 0:
-                ai.logger.error("[EVAL] No models produced probabilities; row skipped.")
-                skipped_rows += 1
-                continue
-
-            avg_proba = proba_sum / n_models
-            pred_id = int(numpy.argmax(avg_proba))
-
-            y_true.append(y_true_id)
-            y_pred.append(pred_id)
-            used_rows += 1
-
-    if used_rows == 0:
-        raise RuntimeError("No evaluable rows. Check headers/classes match the trained model.")
-
-    labels_all = list(range(len(ai.naming['to'])))
-    acc = accuracy_score(y_true, y_pred)
-    cm = confusion_matrix(y_true, y_pred, labels=labels_all)
-    target_names = [ai.naming['to'][i] for i in labels_all]
-    report = classification_report(y_true, y_pred, labels=labels_all, target_names=target_names, zero_division=0)
-
-    ai.logger.info(
-        "EVAL_SUMMARY file=%s, rows_total=%d, rows_used=%d, rows_skipped=%d, accuracy=%.4f",
-        fname, total_rows, used_rows, skipped_rows, acc
-    )
-    ai.logger.info("EVAL_CONFUSION labels=%s matrix=%s", target_names, cm.tolist())
-    ai.logger.info("EVAL_REPORT\n%s", report)
-
-    ai._process_finished(
-        stage="eval",
-        extra={
-            "file": fname,
-            "rows_total": total_rows,
-            "rows_used": used_rows,
-            "rows_skipped": skipped_rows,
-            "accuracy": round(float(acc), 6),
-            "labels": target_names,
-            "confusion_matrix": cm.tolist(),
-        }
-    )
-
-    return acc, cm, report
-
-
-def _load_json(path_or_minus):
-    if path_or_minus == "-" or path_or_minus is None:
-        return json.loads(sys.stdin.read())
-    with open(path_or_minus, "r") as f:
-        return json.load(f)
-
-
-def main():
-    parser = argparse.ArgumentParser(description="FIND3 training/eval/classify helper")
-    sub = parser.add_subparsers(dest="cmd", required=True)
-
-    p_train = sub.add_parser("train", help="Train a model from CSV")
-    p_train.add_argument("--train_csv", required=True, help="Path to training CSV")
-    p_train.add_argument("--save", required=True, help="Where to save model .gz")
-    p_train.add_argument("--data_dir", default=None, help="Directory that may contain config.json")
-    p_train.add_argument("--config", default=None, help="Optional JSON config file to override defaults")
-
-    p_eval = sub.add_parser("eval", help="Evaluate a saved model on holdout CSV")
-    p_eval.add_argument("--model", required=True, help="Path to saved model .gz")
-    p_eval.add_argument("--test_csv", required=True, help="Path to holdout CSV")
-
-    p_class = sub.add_parser("classify", help="Classify one JSON sample")
-    p_class.add_argument("--model", required=True, help="Path to saved model .gz")
-    p_class.add_argument("--json", default="-", help="Path to sensor JSON (or '-' for stdin)")
-
-    p_info = sub.add_parser("info", help="Print model/config info")
-    p_info.add_argument("--model", required=True, help="Path to saved model .gz")
-
-    args = parser.parse_args()
-
-    if args.cmd == "train":
-        cfg = None
-        if args.config:
-            with open(args.config, "r") as f:
-                cfg = json.load(f)
-        ai = AI(path_to_data=args.data_dir, config=cfg)
-        ai.learn(args.train_csv)
-        ai.save(args.save)
-
-    elif args.cmd == "eval":
-        ai = AI()
-        ai.load(args.model)
-        evaluate_holdout(ai, args.test_csv)
-
-    elif args.cmd == "classify":
-        ai = AI()
-        ai.load(args.model)
-        sample = _load_json(args.json)
-        out = ai.classify(sample)
-        print(json.dumps(out, indent=2, default=str))
-
-    elif args.cmd == "info":
-        ai = AI()
-        ai.load(args.model)
-        ai._process_finished(stage="info", extra={"path": args.model})
-
-
-if __name__ == "__main__":
-    main()
-# ====================== END FILE ======================
 
 
 
@@ -1496,6 +1224,7 @@ def do():
                     k, g, len(set(known_groups[k]).intersection(guessed_groups[g])))
 
 '''''
+
 
 
 
