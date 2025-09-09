@@ -47,6 +47,7 @@ RUN python3 -m pip install Cython --install-option="--no-cython-compile" && \
 	go version && \
 	mkdir /build && cd /build && \
 	git clone https://github.com/mr-torgue/find3.git && \
+	cd find3 && git checkout dev && \
 	mkdir /data && \
 	mkdir /app && \
 	echo '#!/bin/bash\n\

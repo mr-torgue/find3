@@ -14,6 +14,6 @@ services:
       - MQTT_EXTERNAL:'10.0.0.13'
       - MQTT_PORT:1884
     volumes: 
-      - /home/raaise/FIND_DATA:/data
-      - /home/raaise/filter-2.4.json:/app/ai/src/settings.json
+      - /home/dev/FIND_DATA:/data
+      - /home/dev/find3/settings/all-default0-threshold0.6.json:/app/ai/src/settings.json
 

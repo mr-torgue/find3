@@ -1,0 +1,13 @@
+We have the following configurations:
+1. 2.4-default0-threshold0.6.json		: 2.4GHz only, default value 0, threshold 0.6 (only includes data with at least 60 percent non-missing values)
+2. 2.4-default-100-threshold0.6.json		: 2.4GHz only, default value -100, threshold 0.6
+3. 2.4-mean-threshold0.6.json			: 2.4GHz only, uses mean to fill in missing values, threshold 0.6
+4. 5-default0-threshold0.6.json			: same, but for 5GHz
+5. 5-default-100-threshold0.6.json		: ...
+6. 5-mean-threshold0.6.json			: ...
+7. all-default0-threshold0.6.json		: same but for 2.4 + 5GHz
+8. all-default-100-threshold0.6.json		: ...
+9. all-mean-threshold0.6.json 			: ...
+
+Replace the file in docker-compose.yaml to run with settings.
+No rebuild needed, just "docker compose down && docker compose up -d".
