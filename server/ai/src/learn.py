@@ -1,4 +1,4 @@
-#!/usr/bin/python3 #9th September
+#!/usr/bin/python3
 
 import json
 import csv
@@ -14,6 +14,9 @@ from threading import Thread
 import functools
 import multiprocessing
 import os  # [Abi, 2025-09-03] For config file path handling
+# [Abi, 2025-09-09] For environment + compact JSON logs
+import sys, platform
+import sklearn
 
 # create logger with 'spam_application'
 logger = logging.getLogger('learn')
@@ -145,6 +148,65 @@ class AI(object):
             len(self.config["ap_blacklist"]) if self.config["ap_blacklist"] else 0
         )
 
+        # [Abi, 2025-09-09] Print environment once
+        self._env_summary_once()
+
+    # [Abi, 2025-09-09] ------- Logging helpers -------
+
+    def _env_summary_once(self):
+        if getattr(self, "_env_logged", False):
+            return
+        try:
+            self.logger.info(
+                "[ENV] python=%s numpy=%s sklearn=%s platform=%s",
+                sys.version.split()[0], numpy.__version__, sklearn.__version__, platform.platform()
+            )
+        finally:
+            self._env_logged = True
+
+    def _clip_list(self, items, limit=8):
+        """Return a short preview list for logging."""
+        items = list(items) if items is not None else []
+        return items[:limit] + (["..."] if len(items) > limit else [])
+
+    def _model_brief(self):
+        """Compact model info without spamming logs."""
+        brief = []
+        for name, clf in getattr(self, "algorithms", {}).items():
+            kind = type(clf).__name__
+            try:
+                pcount = len(clf.get_params())
+            except Exception:
+                pcount = None
+            brief.append({"name": name, "type": kind, "n_params": pcount})
+        return brief
+
+    def _process_finished(self, stage, extra=None):
+        """Unified FINISHED banner with compact details."""
+        info = {
+            "stage": stage,
+            "n_models": len(getattr(self, "algorithms", {})),
+            "n_features": (len(self.header) - 1) if getattr(self, "header", None) else 0,
+            "n_classes": len(self.naming.get("to", {})),
+            "config": {
+                "max_missing": self.config.get("max_missing"),
+                "default_rssi": self.config.get("default_rssi"),
+                "use_mean_imputation": self.config.get("use_mean_imputation"),
+                "models_enabled": bool(self.config.get("models_enabled")),
+                "ap_whitelist_size": len(self.config["ap_whitelist"]) if self.config.get("ap_whitelist") else 0,
+                "ap_blacklist_size": len(self.config["ap_blacklist"]) if self.config.get("ap_blacklist") else 0,
+            },
+            "models": self._model_brief(),
+        }
+        if extra:
+            info.update(extra)
+
+        # Keep it compact & readable in one line
+        try:
+            self.logger.info("PROCESS_FINISHED %s", json.dumps(info, default=str))
+        except Exception:
+            self.logger.info("PROCESS_FINISHED %s", str(info))
+
     def classify(self, sensor_data):
         header = self.header[1:]
         is_unknown = True
@@ -175,7 +237,7 @@ class AI(object):
                         self.logger.debug("Non-float sensor value {} for {}".format(val, sensorName))
 
         # [Abi, 2025-09-09] Soft-check: missing count relative to feature set (log only)
-        missing = int((csv_data == self.config["default_rssi"]).sum()) if csv_data.size else 0
+        missing = max(0, len(header) - seen)
         if missing > int(self.config["max_missing"]):
             self.logger.warning("[CLEAN] inference missing=%d (> %d); proceeding with imputed/defaults",
                                 missing, self.config["max_missing"])
@@ -207,6 +269,17 @@ class AI(object):
         self.logger.info(
             "CLASSIFY_SUMMARY seen=%d, missing=%d, models=%d, unknown=%s, top1=%s",
             seen, missing, len(top1), is_unknown, top1
+        )
+
+        # [Abi, 2025-09-09] Final banner for classify()
+        self._process_finished(
+            stage="classify",
+            extra={
+                "seen": seen,
+                "missing": missing,
+                "unknown": is_unknown,
+                "top1_preview": self._clip_list(top1, 5),
+            }
         )
 
         return payload
@@ -437,6 +510,19 @@ class AI(object):
             elapsed_ms
         )
 
+        # [Abi, 2025-09-09] Final banner for learn()
+        self._process_finished(
+            stage="learn",
+            extra={
+                "elapsed_ms": elapsed_ms,
+                "rows_total": len(raw_rows),
+                "rows_used": len(filtered_rows),
+                "rows_dropped": dropped_rows,
+                "features_preview": self._clip_list(self.header[1:], 8),
+                "classes_preview": self._clip_list([self.naming['to'][k] for k in sorted(self.naming['to'].keys())], 8),
+            }
+        )
+
         # [Abi, 2025-09-03] Legacy commented blocks retained intentionally.
 
     def save(self, save_file):
@@ -461,6 +547,12 @@ class AI(object):
                          save_file, len(self.header) - 1 if self.header else -1,
                          len(self.algorithms) if hasattr(self, 'algorithms') else -1,
                          elapsed_ms)
+
+        # [Abi, 2025-09-09] Final banner for save()
+        self._process_finished(
+            stage="save",
+            extra={"path": save_file, "elapsed_ms": elapsed_ms}
+        )
 
     def load(self, save_file=None):
         # [Abi, 2025-09-09] Make path optional to be consistent with original demo `do()`
@@ -494,6 +586,12 @@ class AI(object):
         # [Abi, 2025-09-09] Keep classify fast after loading
         if self.header:
             self._hdr_to_idx = {h: i for i, h in enumerate(self.header[1:])}
+
+        # [Abi, 2025-09-09] Final banner for load()
+        self._process_finished(
+            stage="load",
+            extra={"path": save_file, "elapsed_ms": elapsed_ms}
+        )
 
 
 def do():
@@ -1125,3 +1223,4 @@ def do():
                     k, g, len(set(known_groups[k]).intersection(guessed_groups[g])))
 
 '''''
+
