@@ -1,9 +1,7 @@
 #!/usr/bin/python3
 
-# --- Silence NumPy/Sklearn deprecation spam BEFORE any sklearn imports ---
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-# You can scope it if you prefer:
 # warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"(numpy|sklearn)\..*")
 
 import json
@@ -712,7 +710,6 @@ def do():
             for g in guessed_groups:
                 print(k, g, len(set(known_groups[k]).intersection(guessed_groups[g])))
 
-# ====================== APPEND: holdout evaluator + CLI ======================
 import argparse
 from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
 
@@ -872,10 +869,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-# ====================== END FILE ======================
-
-
-
+    
 '''' SEPT 3rd 2025 #!/usr/bin/python3
 
 import json
@@ -1414,6 +1408,7 @@ def do():
                     k, g, len(set(known_groups[k]).intersection(guessed_groups[g])))
 
 '''''
+
 
 
 
